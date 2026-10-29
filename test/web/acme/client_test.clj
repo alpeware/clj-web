@@ -10,10 +10,14 @@
             [web.cluster.mesh :as mesh]
             [web.tls.context :as tls])
   (:import [com.sun.net.httpserver HttpExchange HttpHandler HttpServer]
+           [java.math BigInteger]
            [java.net InetSocketAddress]
            [java.nio.charset StandardCharsets]
            [java.nio.file Files]
-           [java.nio.file.attribute FileAttribute]))
+           [java.nio.file.attribute FileAttribute]
+           [java.security KeyPair SecureRandom]
+           [java.util Date]
+           [sun.security.x509 AlgorithmId CertificateAlgorithmId CertificateExtensions CertificateSerialNumber CertificateValidity CertificateVersion CertificateX509Key DNSName GeneralName GeneralNames IPAddressName SubjectAlternativeNameExtension X500Name X509CertImpl X509CertInfo]))
 
 (defn- create-temp-dir []
   (.toFile (Files/createTempDirectory "acme-test" (into-array FileAttribute []))))
@@ -79,119 +83,145 @@
         (with-open [os (.getResponseBody exchange)]
           (.write os body-bytes))))))
 
+(defn- generate-cert-for-keypair
+  [^KeyPair kp ^String domain ^long validity-days]
+  (let [pub (.getPublic kp)
+        priv (.getPrivate kp)
+        info (X509CertInfo.)
+        now (Date.)
+        until (Date. (+ (.getTime now) (* validity-days 86400000)))
+        validity (CertificateValidity. now until)
+        sn (CertificateSerialNumber. (BigInteger. 64 (SecureRandom.)))
+        owner (X500Name. (str "CN=" domain))
+        alg-id (AlgorithmId/get "SHA256withECDSA")]
+    (.setVersion info (CertificateVersion. CertificateVersion/V3))
+    (.setSerialNumber info sn)
+    (.setSubject info owner)
+    (.setIssuer info owner)
+    (.setValidity info validity)
+    (.setKey info (CertificateX509Key. pub))
+    (.setAlgorithmId info (CertificateAlgorithmId. alg-id))
+    (let [exts (CertificateExtensions.)
+          gn (GeneralNames.)]
+      (.add gn (GeneralName. (DNSName. (or domain "localhost"))))
+      (.add gn (GeneralName. (DNSName. "localhost")))
+      (.add gn (GeneralName. (IPAddressName. "127.0.0.1")))
+      (.setExtension exts SubjectAlternativeNameExtension/NAME (SubjectAlternativeNameExtension. gn))
+      (.setExtensions info exts))
+    (X509CertImpl/newSigned info priv "SHA256withECDSA")))
+
 (defn- create-mock-acme-server
   "Spins up an in-memory mock ACME v2 server implementing RFC 8555 directory,
    account registration, order creation, HTTP-01 challenge, finalization, and cert download."
-  []
-  (let [server (HttpServer/create (InetSocketAddress. "127.0.0.1" 0) 0)
-        port (.getPort (.getAddress server))
-        base-url (str "http://127.0.0.1:" port)
-        nonce-counter (atom 0)
-        authz-status-atom (atom "pending")
-        order-status-atom (atom "pending")
-        issued-cert-pem (atom nil)
+  ([]
+   (create-mock-acme-server (jws/generate-ec-keypair)))
+  ([^KeyPair domain-kp]
+   (let [server (HttpServer/create (InetSocketAddress. "127.0.0.1" 0) 0)
+         port (.getPort (.getAddress server))
+         base-url (str "http://127.0.0.1:" port)
+         nonce-counter (atom 0)
+         authz-status-atom (atom "pending")
+         order-status-atom (atom "pending")
+         issued-cert-pem (atom nil)
 
-        next-nonce (fn []
-                     (str "mock-nonce-" (swap! nonce-counter inc)))
+         next-nonce (fn []
+                      (str "mock-nonce-" (swap! nonce-counter inc)))
 
-        handler
-        (proxy [HttpHandler] []
-          (handle [^HttpExchange exchange]
-            (let [method (.getRequestMethod exchange)
-                  path (.getPath (.getRequestURI exchange))
-                  nonce (next-nonce)]
-              (cond
-                ;; GET /directory
-                (and (= method "GET") (= path "/directory"))
-                (let [dir-json (json/write-str {"newNonce" (str base-url "/acme/new-nonce")
-                                                "newAccount" (str base-url "/acme/new-acct")
-                                                "newOrder" (str base-url "/acme/new-order")})
-                      bytes (.getBytes dir-json StandardCharsets/UTF_8)]
-                  (send-http-response! exchange 200 "application/json" nonce {} bytes))
+         handler
+         (proxy [HttpHandler] []
+           (handle [^HttpExchange exchange]
+             (let [method (.getRequestMethod exchange)
+                   path (.getPath (.getRequestURI exchange))
+                   nonce (next-nonce)]
+               (cond
+                 ;; GET /directory
+                 (and (= method "GET") (= path "/directory"))
+                 (let [dir-json (json/write-str {"newNonce" (str base-url "/acme/new-nonce")
+                                                 "newAccount" (str base-url "/acme/new-acct")
+                                                 "newOrder" (str base-url "/acme/new-order")})
+                       bytes (.getBytes dir-json StandardCharsets/UTF_8)]
+                   (send-http-response! exchange 200 "application/json" nonce {} bytes))
 
-                ;; HEAD or GET /acme/new-nonce
-                (and (#{"HEAD" "GET"} method) (= path "/acme/new-nonce"))
-                (send-http-response! exchange 200 nil nonce {} nil)
+                 ;; HEAD or GET /acme/new-nonce
+                 (and (#{"HEAD" "GET"} method) (= path "/acme/new-nonce"))
+                 (send-http-response! exchange 200 nil nonce {} nil)
 
-                ;; POST /acme/new-acct
-                (and (= method "POST") (= path "/acme/new-acct"))
-                (let [resp-json (json/write-str {"status" "valid"})
-                      bytes (.getBytes resp-json StandardCharsets/UTF_8)]
-                  (send-http-response! exchange 201 "application/json" nonce
-                                       {"Location" (str base-url "/acme/acct/1")}
-                                       bytes))
+                 ;; POST /acme/new-acct
+                 (and (= method "POST") (= path "/acme/new-acct"))
+                 (let [resp-json (json/write-str {"status" "valid"})
+                       bytes (.getBytes resp-json StandardCharsets/UTF_8)]
+                   (send-http-response! exchange 201 "application/json" nonce
+                                        {"Location" (str base-url "/acme/acct/1")}
+                                        bytes))
 
-                ;; POST /acme/new-order
-                (and (= method "POST") (= path "/acme/new-order"))
-                (let [order-json (json/write-str {"status" "pending"
-                                                  "identifiers" [{"type" "dns" "value" "example.com"}]
-                                                  "authorizations" [(str base-url "/acme/authz/1")]
-                                                  "finalize" (str base-url "/acme/order/1/finalize")})
-                      bytes (.getBytes order-json StandardCharsets/UTF_8)]
-                  (send-http-response! exchange 201 "application/json" nonce
-                                       {"Location" (str base-url "/acme/order/1")}
-                                       bytes))
+                 ;; POST /acme/new-order
+                 (and (= method "POST") (= path "/acme/new-order"))
+                 (let [order-json (json/write-str {"status" "pending"
+                                                   "identifiers" [{"type" "dns" "value" "example.com"}]
+                                                   "authorizations" [(str base-url "/acme/authz/1")]
+                                                   "finalize" (str base-url "/acme/order/1/finalize")})
+                       bytes (.getBytes order-json StandardCharsets/UTF_8)]
+                   (send-http-response! exchange 201 "application/json" nonce
+                                        {"Location" (str base-url "/acme/order/1")}
+                                        bytes))
 
-                ;; POST /acme/authz/1 (POST-as-GET)
-                (and (= method "POST") (= path "/acme/authz/1"))
-                (let [st @authz-status-atom
-                      authz-json (json/write-str {"status" st
-                                                  "challenges" [{"type" "http-01"
-                                                                 "url" (str base-url "/acme/chall/1")
-                                                                 "token" "mock-token-xyz-987"
-                                                                 "status" st}]})
-                      bytes (.getBytes authz-json StandardCharsets/UTF_8)]
-                  (send-http-response! exchange 200 "application/json" nonce {} bytes))
+                 ;; POST /acme/authz/1 (POST-as-GET)
+                 (and (= method "POST") (= path "/acme/authz/1"))
+                 (let [st @authz-status-atom
+                       authz-json (json/write-str {"status" st
+                                                   "challenges" [{"type" "http-01"
+                                                                  "url" (str base-url "/acme/chall/1")
+                                                                  "token" "mock-token-xyz-987"
+                                                                  "status" st}]})
+                       bytes (.getBytes authz-json StandardCharsets/UTF_8)]
+                   (send-http-response! exchange 200 "application/json" nonce {} bytes))
 
-                ;; POST /acme/chall/1 (trigger validation)
-                (and (= method "POST") (= path "/acme/chall/1"))
-                (do
-                  ;; Mark authorization as valid
-                  (reset! authz-status-atom "valid")
-                  (let [resp-json (json/write-str {"status" "valid"})
-                        bytes (.getBytes resp-json StandardCharsets/UTF_8)]
-                    (send-http-response! exchange 200 "application/json" nonce {} bytes)))
+                 ;; POST /acme/chall/1 (trigger validation)
+                 (and (= method "POST") (= path "/acme/chall/1"))
+                 (do
+                   ;; Mark authorization as valid
+                   (reset! authz-status-atom "valid")
+                   (let [resp-json (json/write-str {"status" "valid"})
+                         bytes (.getBytes resp-json StandardCharsets/UTF_8)]
+                     (send-http-response! exchange 200 "application/json" nonce {} bytes)))
 
-                ;; POST /acme/order/1/finalize
-                (and (= method "POST") (= path "/acme/order/1/finalize"))
-                (let [raw-req (slurp (.getRequestBody exchange))
-                      jws-payload (when-let [p (get (json/read-str raw-req) "payload")]
-                                    (json/read-str (jws/base64url-decode-str p)))
-                      _csr-b64 (get jws-payload "csr")
-                      cert-data (tls/generate-self-signed-cert "example.com" 90)
-                      cert-pem (tls/encode-cert-pem (:certificate cert-data))]
-                  (reset! issued-cert-pem cert-pem)
-                  (reset! order-status-atom "valid")
-                  (let [order-json (json/write-str {"status" "valid"
-                                                    "certificate" (str base-url "/acme/order/1/cert")})
-                        bytes (.getBytes order-json StandardCharsets/UTF_8)]
-                    (send-http-response! exchange 200 "application/json" nonce {} bytes)))
+                 ;; POST /acme/order/1/finalize
+                 (and (= method "POST") (= path "/acme/order/1/finalize"))
+                 (let [cert (generate-cert-for-keypair domain-kp "example.com" 90)
+                       cert-pem (tls/encode-cert-pem cert)]
+                   (reset! issued-cert-pem cert-pem)
+                   (reset! order-status-atom "valid")
+                   (let [order-json (json/write-str {"status" "valid"
+                                                     "certificate" (str base-url "/acme/order/1/cert")})
+                         bytes (.getBytes order-json StandardCharsets/UTF_8)]
+                     (send-http-response! exchange 200 "application/json" nonce {} bytes)))
 
-                ;; POST /acme/order/1 (poll order status)
-                (and (= method "POST") (= path "/acme/order/1"))
-                (let [st @order-status-atom
-                      order-json (json/write-str (cond-> {"status" st}
-                                                   (= st "valid") (assoc "certificate" (str base-url "/acme/order/1/cert"))))
-                      bytes (.getBytes order-json StandardCharsets/UTF_8)]
-                  (send-http-response! exchange 200 "application/json" nonce {} bytes))
+                 ;; POST /acme/order/1 (poll order status)
+                 (and (= method "POST") (= path "/acme/order/1"))
+                 (let [st @order-status-atom
+                       order-json (json/write-str (cond-> {"status" st}
+                                                    (= st "valid") (assoc "certificate" (str base-url "/acme/order/1/cert"))))
+                       bytes (.getBytes order-json StandardCharsets/UTF_8)]
+                   (send-http-response! exchange 200 "application/json" nonce {} bytes))
 
-                ;; POST /acme/order/1/cert (download certificate)
-                (and (= method "POST") (= path "/acme/order/1/cert"))
-                (let [cert-str @issued-cert-pem
-                      bytes (.getBytes (or cert-str "") StandardCharsets/UTF_8)]
-                  (send-http-response! exchange 200 "application/pem-certificate-chain" nonce {} bytes))
+                 ;; POST /acme/order/1/cert (download certificate)
+                 (and (= method "POST") (= path "/acme/order/1/cert"))
+                 (let [cert-str @issued-cert-pem
+                       bytes (.getBytes (or cert-str "") StandardCharsets/UTF_8)]
+                   (send-http-response! exchange 200 "application/pem-certificate-chain" nonce {} bytes))
 
-                :else
-                (send-http-response! exchange 404 "text/plain" nonce {} (.getBytes "Not Found"))))))]
-    (.createContext server "/" handler)
-    (.start server)
-    {:server server
-     :base-url base-url
-     :port port
-     :stop-fn (fn [] (try (.stop server 0) (catch Exception _ nil)))}))
+                 :else
+                 (send-http-response! exchange 404 "text/plain" nonce {} (.getBytes "Not Found"))))))]
+     (.createContext server "/" handler)
+     (.start server)
+     {:server server
+      :base-url base-url
+      :port port
+      :stop-fn (fn [] (try (.stop server 0) (catch Exception _ nil)))})))
 
 (deftest test-e2e-acme-provisioning-flow
-  (let [mock-server (create-mock-acme-server)
+  (let [domain-kp (jws/generate-ec-keypair)
+        mock-server (create-mock-acme-server domain-kp)
         base-url (:base-url mock-server)
         temp-dir (create-temp-dir)
         config {:domain "example.com"
@@ -213,6 +243,7 @@
       (testing "provision-certificate! completes full RFC 8555 flow against mock ACME server"
         (let [result (client/provision-certificate! config cluster-mgr tls-mgr
                                                     {:directory-url (str base-url "/directory")
+                                                     :domain-keypair domain-kp
                                                      :poll-interval-ms 20
                                                      :poll-timeout-ms 5000})]
           (is (some? result))

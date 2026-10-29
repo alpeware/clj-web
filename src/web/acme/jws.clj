@@ -10,6 +10,7 @@
            [java.math BigInteger]
            [java.nio.charset StandardCharsets]
            [java.nio.file Files StandardCopyOption]
+           [java.nio.file.attribute PosixFilePermissions]
            [java.security KeyFactory KeyPair KeyPairGenerator MessageDigest PrivateKey PublicKey Signature]
            [java.security.interfaces ECPublicKey]
            [java.security.spec X509EncodedKeySpec]
@@ -101,6 +102,9 @@
             tmp-pub (File/createTempFile "acc-pub" ".tmp" acme-dir)]
         (spit tmp-priv priv-pem)
         (spit tmp-pub pub-pem)
+        (try
+          (Files/setPosixFilePermissions (.toPath tmp-priv) (PosixFilePermissions/fromString "rw-------"))
+          (catch UnsupportedOperationException _ nil))
         (try
           (Files/move (.toPath tmp-priv) (.toPath priv-file)
                       (into-array java.nio.file.CopyOption [StandardCopyOption/ATOMIC_MOVE

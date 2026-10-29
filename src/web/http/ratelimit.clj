@@ -35,10 +35,7 @@
                         cleaned)
               addr (try
                      (java.net.InetAddress/ofLiteral cleaned)
-                     (catch Exception _
-                       (try
-                         (java.net.InetAddress/getByName cleaned)
-                         (catch Exception _ nil))))]
+                     (catch Exception _ nil))]
           (cond
             (instance? java.net.Inet4Address addr)
             (let [bs (.getAddress addr)]
@@ -56,6 +53,20 @@
             :else
             cleaned))))))
 
+(defn prune-stale-buckets
+  "Pure function to evict token buckets that have been idle for >= max-idle-ms,
+   bounding RAM consumption."
+  [state now-ms max-idle-ms]
+  (let [now-ms (long now-ms)
+        max-idle-ms (long max-idle-ms)
+        buckets (get state :buckets {})
+        active (into {}
+                     (remove (fn [[_k bucket]]
+                               (let [last-ms (long (or (:last-refill-ms bucket) 0))]
+                                 (>= (- now-ms last-ms) max-idle-ms))))
+                     buckets)]
+    (assoc state :buckets active)))
+
 (defn check-and-consume
   "Pure function evaluating a token bucket consumption against bucket-key.
    Refills tokens according to elapsed time since last-refill-ms up to capacity.
@@ -63,7 +74,11 @@
   ([state bucket-key tokens now-ms]
    (check-and-consume state bucket-key tokens now-ms nil))
   ([state bucket-key tokens now-ms opts]
-   (let [capacity (double (or (:capacity opts)
+   (let [max-b (long (or (:max-buckets state) 4096))
+         state (if (> (count (:buckets state)) max-b)
+                 (prune-stale-buckets state now-ms 300000)
+                 state)
+         capacity (double (or (:capacity opts)
                               (get-in state [:buckets bucket-key :capacity])
                               (:capacity state)
                               100.0))
@@ -117,17 +132,3 @@
     {:allowed? allowed?
      :state updated-state
      :remaining-bytes remaining-bytes}))
-
-(defn prune-stale-buckets
-  "Pure function to evict token buckets that have been idle for >= max-idle-ms,
-   bounding RAM consumption."
-  [state now-ms max-idle-ms]
-  (let [now-ms (long now-ms)
-        max-idle-ms (long max-idle-ms)
-        buckets (get state :buckets {})
-        active (into {}
-                     (remove (fn [[_k bucket]]
-                               (let [last-ms (long (or (:last-refill-ms bucket) 0))]
-                                 (>= (- now-ms last-ms) max-idle-ms))))
-                     buckets)]
-    (assoc state :buckets active)))

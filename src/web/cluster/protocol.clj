@@ -33,7 +33,25 @@
      :acme-dns-challenges {}
      :pending-challenge-acks {}
      :tls-bundle nil
-     :received-mail-ids #{}}))
+     :received-mail-ids #{}
+     :received-mail-order []}))
+
+(defn- add-received-mail-id
+  [state mail-id]
+  (let [ids (:received-mail-ids state #{})
+        order (:received-mail-order state [])]
+    (if (contains? ids mail-id)
+      state
+      (let [new-ids (conj ids mail-id)
+            new-order (conj order mail-id)]
+        (if (> (count new-order) 1000)
+          (let [evicted (first new-order)]
+            (assoc state
+                   :received-mail-ids (disj new-ids evicted)
+                   :received-mail-order (subvec new-order 1)))
+          (assoc state
+                 :received-mail-ids new-ids
+                 :received-mail-order new-order))))))
 
 (defn compute-healthy-nodes
   "Returns the set of reachable nodes including local node-id plus all peers
@@ -222,7 +240,7 @@
                 already-seen? (contains? (:received-mail-ids st) mail-id)]
             (if already-seen?
               {:state st :outbound [] :effects base-effects}
-              (let [st' (update st :received-mail-ids conj mail-id)]
+              (let [st' (add-received-mail-id st mail-id)]
                 {:state st'
                  :outbound []
                  :effects (conj base-effects {:type :smtp/save-replicated-mail :mail (:mail msg)})})))
@@ -288,7 +306,7 @@
       :cluster/replicate-mail
       (let [mail (:mail event)
             mail-id (or (:id mail) (str (java.util.UUID/randomUUID)))
-            st (update state :received-mail-ids conj mail-id)
+            st (add-received-mail-id state mail-id)
             broadcast {:to :all
                        :channel :control
                        :message {:type :smtp/mail-received

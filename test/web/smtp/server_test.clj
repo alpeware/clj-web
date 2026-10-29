@@ -180,3 +180,59 @@
                   (is (= ["admin@example.com"] (:to @received-atom)))))))
           (finally
             (smtp/stop-smtp-server! server)))))))
+
+(deftest test-read-bounded-line
+  (testing "Reads lines up to limit and handles CRLF or LF"
+    (let [input "Line 1\r\nLine 2\nLine 3"
+          reader (BufferedReader. (java.io.StringReader. input))]
+      (is (= "Line 1" (smtp/read-bounded-line reader 4096)))
+      (is (= "Line 2" (smtp/read-bounded-line reader 4096)))
+      (is (= "Line 3" (smtp/read-bounded-line reader 4096)))
+      (is (nil? (smtp/read-bounded-line reader 4096)))))
+
+  (testing "Throws ex-info when line exceeds max chars"
+    (let [long-line (str (apply str (repeat 20 "A")) "\r\n")
+          reader (BufferedReader. (java.io.StringReader. long-line))]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"SMTP line length limit exceeded"
+                            (smtp/read-bounded-line reader 10))))))
+
+(deftest test-smtp-pipelined-commands
+  (with-temp-state-dir
+    (fn [^File state-dir]
+      (let [port (find-free-port)
+            state-dir-str (.getAbsolutePath state-dir)
+            cfg {:domain "example.com"
+                 :state-dir state-dir-str
+                 :smtp {:bind-ip "127.0.0.1"
+                        :port port
+                        :socket-timeout-ms 10000
+                        :max-message-bytes 65536
+                        :allowed-recipients #{"admin@example.com"}}}
+            tls-mgr (tls/init-tls-manager! cfg)
+            server (smtp/start-smtp-server! cfg tls-mgr {})]
+        (try
+          (with-open [sock (Socket. "127.0.0.1" port)]
+            (.setSoTimeout sock 5000)
+            (let [in (BufferedReader. (InputStreamReader. (.getInputStream sock) StandardCharsets/UTF_8))
+                  out (BufferedWriter. (OutputStreamWriter. (.getOutputStream sock) StandardCharsets/UTF_8))]
+              ;; Read greeting
+              (let [banner (.readLine in)]
+                (is (.startsWith banner "220 example.com ESMTP clj-web ready")))
+              ;; Send pipelined commands in one single flush
+              (.write out "EHLO client.sender.org\r\nNOOP\r\nQUIT\r\n")
+              (.flush out)
+              ;; Read EHLO response lines
+              (let [l1 (.readLine in)
+                    l2 (.readLine in)
+                    l3 (.readLine in)
+                    l4 (.readLine in)]
+                (is (= "250-example.com" l1))
+                (is (= "250-STARTTLS" l2))
+                (is (= "250-SIZE 65536" l3))
+                (is (= "250 8BITMIME" l4)))
+              ;; Read NOOP response
+              (is (= "250 2.0.0 OK" (.readLine in)))
+              ;; Read QUIT response
+              (is (= "221 2.0.0 Bye" (.readLine in)))))
+          (finally
+            (smtp/stop-smtp-server! server)))))))

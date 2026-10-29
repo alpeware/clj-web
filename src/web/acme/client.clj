@@ -101,7 +101,7 @@
        (swap! client-state assoc :nonce new-nonce))
      ;; Check for badNonce retry
      (if (and (= status 400)
-              (< retry-count 2)
+              (< retry-count 1)
               (= (get json-data "type") "urn:ietf:params:acme:error:badNonce"))
        (do
          (swap! client-state assoc :nonce (or new-nonce (fetch-nonce client (get directory "newNonce"))))
@@ -305,7 +305,9 @@
                           now (System/currentTimeMillis)]
                       (when (and leader? (needs-renewal? config tls-manager now))
                         (provision-certificate! config cluster-mgr tls-manager opts)))
-                    (catch Exception _ nil))))]
+                    (catch Exception e
+                      (binding [*out* *err*]
+                        (println (str "Error in ACME renewal loop: " (.getMessage e))))))))]
      (.scheduleWithFixedDelay ^ScheduledExecutorService executor
                               ^Runnable task
                               0

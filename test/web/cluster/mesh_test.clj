@@ -54,10 +54,12 @@
     (testing "mismatching fingerprint returns false"
       (is (false? (mesh/verify-peer-fingerprint? cfg :ns1 fp2))))
 
-    (testing "nil or blank configured fingerprint allows connection"
-      (is (true? (mesh/verify-peer-fingerprint? cfg :ns2 fp2)))
-      (is (true? (mesh/verify-peer-fingerprint? cfg :ns3 fp2)))
-      (is (true? (mesh/verify-peer-fingerprint? cfg :unknown-node fp2))))))
+    (testing "nil or blank configured or actual fingerprint is strictly fail-closed"
+      (is (false? (mesh/verify-peer-fingerprint? cfg :ns2 fp2)))
+      (is (false? (mesh/verify-peer-fingerprint? cfg :ns3 fp2)))
+      (is (false? (mesh/verify-peer-fingerprint? cfg :unknown-node fp2)))
+      (is (false? (mesh/verify-peer-fingerprint? cfg :ns1 nil)))
+      (is (false? (mesh/verify-peer-fingerprint? cfg :ns1 ""))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Unit Tests: Node Identity Persistence
@@ -81,7 +83,14 @@
               (is (= (:fingerprint id1) (:fingerprint id2)))
               (is (= (:ice-creds id1) (:ice-creds id2)))
               (is (= (tls/encode-cert-pem (:cert id1))
-                     (tls/encode-cert-pem (:cert id2))))))))
+                     (tls/encode-cert-pem (:cert id2))))))
+
+          (testing "throws ex-info when node-identity file is corrupt"
+            (let [identity-file (io/file dir "cluster" "node-identity.edn")]
+              (spit identity-file "corrupted invalid edn content {{{")
+              (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                                    #"Corrupt cluster node-identity.edn file"
+                                    (mesh/load-or-create-node-identity! dir :ns1)))))))
       (finally
         (delete-dir-recursively dir)))))
 

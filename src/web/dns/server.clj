@@ -45,7 +45,7 @@
             (.name "clj-web-dns-udp")
             (.start
              (fn []
-               (let [buf (ByteBuffer/allocate 1500)]
+               (let [buf (ByteBuffer/allocate 4096)]
                  (while (.get running?)
                    (try
                      (.clear buf)

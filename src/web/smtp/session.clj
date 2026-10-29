@@ -27,7 +27,8 @@
       :mail-from nil
       :rcpt-to []
       :data-lines []
-      :data-bytes 0})))
+      :data-bytes 0
+      :over-size? false})))
 
 (defn greeting
   "Generates initial 220 service ready greeting upon client TCP connection."
@@ -43,13 +44,12 @@
     (or (contains? allowed-recipients addr-lower)
         (contains? allowed-recipients (str "@" domain-lower))
         (contains? allowed-recipients "*")
-        (contains? allowed-recipients :all)
-        (and (empty? allowed-recipients) (str/ends-with? addr-lower (str "@" domain-lower))))))
+        (contains? allowed-recipients :all))))
 
 (defn- parse-mail-from-line
   "Parses reverse-path and optional SIZE= parameter from MAIL FROM line."
   [raw-line]
-  (let [line (subs raw-line 9) ;; drop "MAIL FROM:"
+  (let [line (str/replace-first raw-line #"(?i)^MAIL\s*FROM:\s*" "")
         size-match (re-find #"(?i)\bSIZE=(\d+)" line)
         size (when size-match (Long/parseLong (second size-match)))
         path-match (re-find #"<([^>]*)>" line)]
@@ -63,7 +63,7 @@
 (defn- parse-rcpt-to-line
   "Parses forward-path from RCPT TO line."
   [raw-line]
-  (let [line (subs raw-line 7) ;; drop "RCPT TO:"
+  (let [line (str/replace-first raw-line #"(?i)^RCPT\s*TO:\s*" "")
         path-match (re-find #"<([^>]*)>" line)]
     (if path-match
       (second path-match)
@@ -80,12 +80,12 @@
       ;; -----------------------------------------------------------------------
       (if (= line ".")
         ;; End of data stream
-        (if (> (:data-bytes state) (:max-message-bytes state))
-          {:state (assoc state :state :greeted :mail-from nil :rcpt-to [] :data-lines [] :data-bytes 0)
+        (if (or (:over-size? state) (> (:data-bytes state) (:max-message-bytes state)))
+          {:state (assoc state :state :greeted :mail-from nil :rcpt-to [] :data-lines [] :data-bytes 0 :over-size? false)
            :responses ["552 5.3.4 Message size exceeds fixed maximum"]
            :effects []}
           (let [data-str (str (str/join "\r\n" (:data-lines state)) "\r\n")]
-            {:state (assoc state :state :greeted :mail-from nil :rcpt-to [] :data-lines [] :data-bytes 0)
+            {:state (assoc state :state :greeted :mail-from nil :rcpt-to [] :data-lines [] :data-bytes 0 :over-size? false)
              :responses ["250 2.0.0 OK: queued"]
              :effects [{:type :deliver-mail
                         :from (:mail-from state)
@@ -97,12 +97,31 @@
         ;; Data line: leading-dot unstuffing (RFC 5321 §4.5.2) and size check
         (let [unstuffed (if (str/starts-with? line "..") (subs line 1) line)
               line-bytes (+ (alength (.getBytes ^String line StandardCharsets/UTF_8)) 2)
-              new-bytes (+ (:data-bytes state) line-bytes)]
-          {:state (assoc state
-                         :data-lines (conj (:data-lines state) unstuffed)
-                         :data-bytes new-bytes)
-           :responses []
-           :effects []}))
+              new-bytes (+ (:data-bytes state) line-bytes)
+              max-bytes (:max-message-bytes state)]
+          (cond
+            ;; Exceeded 2 * max-bytes: immediate abort and close connection
+            (> new-bytes (* 2 max-bytes))
+            {:state (assoc state :state :greeted :mail-from nil :rcpt-to [] :data-lines [] :data-bytes 0 :over-size? false)
+             :responses ["552 5.3.4 Message size exceeds fixed maximum"]
+             :effects [{:type :close}]}
+
+            ;; Exceeded max-bytes: stop accumulating data lines to bound memory
+            (> new-bytes max-bytes)
+            {:state (assoc state
+                           :data-lines []
+                           :data-bytes new-bytes
+                           :over-size? true)
+             :responses []
+             :effects []}
+
+            ;; Within limit: accumulate data lines
+            :else
+            {:state (assoc state
+                           :data-lines (conj (:data-lines state) unstuffed)
+                           :data-bytes new-bytes)
+             :responses []
+             :effects []})))
 
       ;; -----------------------------------------------------------------------
       ;; Command mode

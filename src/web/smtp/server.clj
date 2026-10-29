@@ -90,6 +90,38 @@
 ;; Connection Handling
 ;; ---------------------------------------------------------------------------
 
+(defn read-bounded-line
+  "Reads a single line terminated by \n or \r\n up to max-line-chars characters.
+   Returns the line string without trailing \r or \n, or nil on EOF if no characters read.
+   Throws ex-info if line exceeds max-line-chars without encountering a newline."
+  ([^BufferedReader reader]
+   (read-bounded-line reader 4096))
+  ([^BufferedReader reader max-line-chars]
+   (let [sb (StringBuilder.)
+         limit (long (or max-line-chars 4096))]
+     (loop []
+       (let [ch (.read reader)]
+         (cond
+           (= ch -1)
+           (if (pos? (.length sb))
+             (.toString sb)
+             nil)
+
+           (= ch (int \newline))
+           (let [s (.toString sb)]
+             (if (str/ends-with? s "\r")
+               (subs s 0 (dec (count s)))
+               s))
+
+           (>= (.length sb) limit)
+           (throw (ex-info (str "SMTP line length limit exceeded (max " limit " chars)")
+                           {:type :smtp/line-too-long :limit limit}))
+
+           :else
+           (do
+             (.append sb (char ch))
+             (recur))))))))
+
 (defn- run-session-loop!
   [^Socket initial-socket config tls-manager opts sock-timeout]
   (let [domain (get config :domain "localhost")
@@ -98,22 +130,24 @@
         max-bytes (long (get smtp-cfg :max-message-bytes 131072))
         allowed (get smtp-cfg :allowed-recipients #{})
         remote-addr (.getInetAddress initial-socket)
-        remote-ip (if remote-addr (.getHostAddress remote-addr) "127.0.0.1")]
+        remote-ip (if remote-addr (.getHostAddress remote-addr) "127.0.0.1")
+        init-in (BufferedReader. (InputStreamReader. (.getInputStream initial-socket) StandardCharsets/UTF_8))
+        init-out (BufferedWriter. (OutputStreamWriter. (.getOutputStream initial-socket) StandardCharsets/UTF_8))
+        init-st (let [s (session/init-session {:domain domain
+                                               :max-message-bytes max-bytes
+                                               :allowed-recipients allowed
+                                               :tls-active? (instance? SSLSocket initial-socket)})
+                      greet (session/greeting s)]
+                  (doseq [resp (:responses greet)]
+                    (.write init-out (str resp "\r\n")))
+                  (.flush init-out)
+                  (:state greet))]
     (loop [current-socket initial-socket
-           session-st (let [s (session/init-session {:domain domain
-                                                     :max-message-bytes max-bytes
-                                                     :allowed-recipients allowed
-                                                     :tls-active? (instance? SSLSocket initial-socket)})
-                            greet (session/greeting s)
-                            writer (BufferedWriter. (OutputStreamWriter. (.getOutputStream initial-socket) StandardCharsets/UTF_8))]
-                        (doseq [resp (:responses greet)]
-                          (.write writer (str resp "\r\n")))
-                        (.flush writer)
-                        (:state greet))]
-      (let [in (BufferedReader. (InputStreamReader. (.getInputStream current-socket) StandardCharsets/UTF_8))
-            out (BufferedWriter. (OutputStreamWriter. (.getOutputStream current-socket) StandardCharsets/UTF_8))
-            line (try
-                   (.readLine in)
+           in init-in
+           out init-out
+           session-st init-st]
+      (let [line (try
+                   (read-bounded-line in 4096)
                    (catch SocketTimeoutException _ nil)
                    (catch Exception _ nil))]
         (if (nil? line)
@@ -165,12 +199,13 @@
                   (.setEnabledProtocols ssl-socket (into-array String ["TLSv1.3" "TLSv1.2"]))
                   (.setSoTimeout ssl-socket sock-timeout)
                   (.startHandshake ssl-socket)
-                  ;; Continue session loop over the upgraded TLS socket
-                  (recur ssl-socket new-state))
+                  (let [new-in (BufferedReader. (InputStreamReader. (.getInputStream ssl-socket) StandardCharsets/UTF_8))
+                        new-out (BufferedWriter. (OutputStreamWriter. (.getOutputStream ssl-socket) StandardCharsets/UTF_8))]
+                    (recur ssl-socket new-in new-out new-state)))
 
                 ;; Normal command or data line: continue loop
                 :else
-                (recur current-socket new-state)))))))))
+                (recur current-socket in out new-state)))))))))
 
 (defn- handle-client-connection!
   [^Socket client-socket config tls-manager opts semaphore limiter-atom sock-timeout]

@@ -9,11 +9,13 @@
             [datachannel.api :as api]
             [datachannel.dtls :as dtls]
             [web.cluster.protocol :as protocol]
+            [web.config :as config]
             [web.smtp.server :as smtp]
             [web.tls.context :as tls])
   (:import [java.io File]
            [java.nio.charset StandardCharsets]
            [java.nio.file Files StandardCopyOption]
+           [java.nio.file.attribute PosixFilePermissions]
            [java.security MessageDigest]
            [java.util.concurrent Executors TimeUnit]
            [java.util.concurrent.atomic AtomicBoolean]))
@@ -28,12 +30,19 @@
     (apply str (map #(format "%02x" (bit-and % 0xFF)) digest))))
 
 (defn deterministic-ice-creds
-  "Derives deterministic ICE ufrag and pwd credentials from node-id."
-  [node-id]
-  (let [name-str (name (or node-id :node))
-        ufrag (subs (sha256-hex (.getBytes (str "ufrag-" name-str) StandardCharsets/UTF_8)) 0 8)
-        pwd (subs (sha256-hex (.getBytes (str "pwd-" name-str) StandardCharsets/UTF_8)) 0 24)]
-    {:ufrag ufrag :pwd pwd}))
+  "Derives deterministic ICE ufrag and pwd credentials from node-id and optional fingerprint.
+   When fingerprint is provided, incorporates the normalized fingerprint for non-public credentials.
+   Maintains 1-arg arity for backwards compatibility."
+  ([node-id]
+   (deterministic-ice-creds node-id nil))
+  ([node-id fingerprint]
+   (let [name-str (name (or node-id :node))
+         seed-str (if (and (string? fingerprint) (not (str/blank? fingerprint)))
+                    (str name-str "-" (config/normalize-fingerprint fingerprint))
+                    name-str)
+         ufrag (subs (sha256-hex (.getBytes (str "ufrag-" seed-str) StandardCharsets/UTF_8)) 0 8)
+         pwd (subs (sha256-hex (.getBytes (str "pwd-" seed-str) StandardCharsets/UTF_8)) 0 24)]
+     {:ufrag ufrag :pwd pwd})))
 
 (defn load-or-create-node-identity!
   "Loads or creates node DTLS identity containing certificate, private key,
@@ -45,28 +54,46 @@
         identity-file (io/file cluster-dir "node-identity.edn")]
     (if (.exists identity-file)
       (try
-        (let [edn-data (edn/read-string (slurp identity-file))
-              certs (tls/parse-cert-chain-pem (:cert-pem edn-data))
-              key (tls/parse-private-key-pem (:key-pem edn-data))]
-          {:cert (first certs)
-           :key key
-           :fingerprint (:fingerprint edn-data)
-           :ice-creds (:ice-creds edn-data)
-           :cert-data {:cert (first certs) :key key :fingerprint (:fingerprint edn-data)}})
-        (catch Exception _ nil))
+        (let [edn-data (edn/read-string (slurp identity-file))]
+          (when-not (and (map? edn-data)
+                         (:cert-pem edn-data)
+                         (:key-pem edn-data)
+                         (:fingerprint edn-data)
+                         (:ice-creds edn-data))
+            (throw (ex-info "Corrupt cluster node-identity.edn file"
+                            {:file (.getAbsolutePath identity-file)})))
+          (let [certs (tls/parse-cert-chain-pem (:cert-pem edn-data))
+                key (tls/parse-private-key-pem (:key-pem edn-data))]
+            (when (or (empty? certs) (nil? key))
+              (throw (ex-info "Corrupt cluster node-identity.edn file"
+                              {:file (.getAbsolutePath identity-file)})))
+            {:cert (first certs)
+             :key key
+             :fingerprint (:fingerprint edn-data)
+             :ice-creds (:ice-creds edn-data)
+             :cert-data {:cert (first certs) :key key :fingerprint (:fingerprint edn-data)}}))
+        (catch clojure.lang.ExceptionInfo e
+          (throw e))
+        (catch Exception e
+          (throw (ex-info "Corrupt cluster node-identity.edn file"
+                          {:file (.getAbsolutePath identity-file)}
+                          e))))
       (let [cert-data (dtls/generate-cert)
             cert (:cert cert-data)
             key (:key cert-data)
             fp (:fingerprint cert-data)
             cert-pem (tls/encode-cert-pem cert)
             key-pem (tls/encode-private-key-pem key)
-            ice-creds (deterministic-ice-creds node-id)
+            ice-creds (deterministic-ice-creds node-id fp)
             serialized (pr-str {:cert-pem cert-pem
                                 :key-pem key-pem
                                 :fingerprint fp
                                 :ice-creds ice-creds})
             tmp-file (File/createTempFile "identity" ".tmp" cluster-dir)]
         (spit tmp-file serialized)
+        (try
+          (Files/setPosixFilePermissions (.toPath tmp-file) (PosixFilePermissions/fromString "rw-------"))
+          (catch UnsupportedOperationException _ nil))
         (try
           (Files/move (.toPath tmp-file) (.toPath identity-file)
                       (into-array java.nio.file.CopyOption [StandardCopyOption/ATOMIC_MOVE
@@ -82,14 +109,17 @@
 
 (defn verify-peer-fingerprint?
   "Verifies actual DTLS peer fingerprint against configured fingerprint for peer-id.
-   Returns true if configured fingerprint is nil/blank or matches actual fingerprint."
+   Strictly fail-closed: returns false if expected or actual-fingerprint is nil or blank."
   [config peer-id actual-fingerprint]
   (let [expected (get-in config [:cluster :nodes peer-id :fingerprint])]
-    (if (or (nil? expected) (str/blank? expected))
-      true
-      (let [norm-exp (str/upper-case (str/trim expected))
-            norm-act (str/upper-case (str/trim (or actual-fingerprint "")))]
-        (= norm-exp norm-act)))))
+    (if (or (nil? expected) (str/blank? (str expected))
+            (nil? actual-fingerprint) (str/blank? (str actual-fingerprint)))
+      false
+      (try
+        (let [norm-exp (config/normalize-fingerprint expected)
+              norm-act (config/normalize-fingerprint actual-fingerprint)]
+          (= norm-exp norm-act))
+        (catch Exception _ false)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Cluster Mesh Lifecycle
@@ -128,7 +158,10 @@
              (case (:type effect)
                :leader-elected
                (when-let [cb (:on-leader-elected opts)]
-                 (try (cb (:leader-id effect) (:term effect)) (catch Exception _ nil)))
+                 (try (cb (:leader-id effect) (:term effect))
+                      (catch Exception e
+                        (binding [*out* *err*]
+                          (println "Error in on-leader-elected callback:" (.getMessage e))))))
 
                :acme/challenge-updated
                (swap! acme-challenges-atom assoc (:token effect) (:key-auth effect))
@@ -141,18 +174,25 @@
                  (when-let [p (get @quorum-promises-atom (:token effect))]
                    (deliver p true))
                  (when-let [cb (:on-challenge-quorum opts)]
-                   (try (cb (:token effect)) (catch Exception _ nil))))
+                   (try (cb (:token effect))
+                        (catch Exception e
+                          (binding [*out* *err*]
+                            (println "Error in on-challenge-quorum callback:" (.getMessage e)))))))
 
                :tls/install-bundle
                (when tls-manager
                  (try
                    (tls/update-tls-bundle! tls-manager (:cert-pem effect) (:key-pem effect))
-                   (catch Exception _ nil)))
+                   (catch Exception e
+                     (binding [*out* *err*]
+                       (println "Error updating TLS bundle:" (.getMessage e))))))
 
                :smtp/save-replicated-mail
                (try
                  (smtp/save-eml! state-dir (:mail effect))
-                 (catch Exception _ nil))
+                 (catch Exception e
+                   (binding [*out* *err*]
+                     (println "Error saving replicated mail:" (.getMessage e)))))
 
                nil)))
 
@@ -207,23 +247,33 @@
            (swap! peer-conns-atom assoc pid {:peer-id pid :transport :in-memory})
            ;; datachannel-clj descriptor
            (try
-             (let [local-port (int (or (get-in nodes-cfg [node-id :port]) 5000))
+             (let [raw-peer-fp (:fingerprint peer-cfg)
+                   peer-fp (when (and (string? raw-peer-fp) (not (str/blank? raw-peer-fp)))
+                             (config/normalize-fingerprint raw-peer-fp))
+                   _ (when (and (not (:allow-unauthenticated? opts)) (str/blank? (str peer-fp)))
+                       (throw (ex-info (str "Missing required DTLS fingerprint for cluster peer: " (pr-str pid))
+                                       {:peer-id pid :peer-cfg peer-cfg})))
+                   local-port (int (or (get-in nodes-cfg [node-id :port]) 5000))
                    raw-node (api/create-node {:port local-port :setup setup})
+                   local-fp (when-let [raw-fp (:fingerprint identity)]
+                              (config/normalize-fingerprint raw-fp))
+                   local-ice (deterministic-ice-creds node-id local-fp)
                    node (assoc raw-node
                                :cert-data (:cert-data identity)
-                               :ice-creds (:ice-creds identity)
+                               :ice-creds local-ice
                                :local-sdp-params (assoc (:local-sdp-params raw-node)
-                                                        :ice-ufrag (:ufrag (:ice-creds identity))
-                                                        :ice-pwd (:pwd (:ice-creds identity))
-                                                        :fingerprint (:fingerprint identity)
+                                                        :ice-ufrag (:ufrag local-ice)
+                                                        :ice-pwd (:pwd local-ice)
+                                                        :fingerprint local-fp
                                                         :setup setup))
                    ctrl-id (atom nil)
                    hb-id (atom nil)
+                   remote-ice (deterministic-ice-creds pid peer-fp)
                    remote-sdp {:ip peer-ip
                                :port peer-port
-                               :fingerprint (:fingerprint peer-cfg)
-                               :remote-ice-ufrag (:ufrag (deterministic-ice-creds pid))
-                               :remote-ice-pwd (:pwd (deterministic-ice-creds pid))}
+                               :fingerprint peer-fp
+                               :remote-ice-ufrag (:ufrag remote-ice)
+                               :remote-ice-pwd (:pwd remote-ice)}
                    callbacks {:on-open (fn [evt]
                                          (when-not (:channel-id evt)
                                            ;; SCTP transport connected: create channels
@@ -242,7 +292,12 @@
                                           (dispatch-event! {:type :cluster/peer-disconnected :peer-id pid} (System/currentTimeMillis)))}]
                (api/start! node remote-sdp callbacks)
                (swap! peer-conns-atom assoc pid {:node node :control-id ctrl-id :heartbeat-id hb-id}))
-             (catch Exception _ nil)))))
+             (catch Exception e
+               (binding [*out* *err*]
+                 (println (str "Error establishing datachannel connection to peer " pid ": " (.getMessage e))))
+               (when (and (not (:allow-unauthenticated? opts)) (str/blank? (str (:fingerprint peer-cfg))))
+                 (throw e))
+               nil)))))
 
      ;; Background periodic heartbeat ticker
      (.scheduleWithFixedDelay scheduled-executor

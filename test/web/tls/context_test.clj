@@ -98,9 +98,11 @@
                 key-pem (tls/encode-private-key-pem (:private-key bundle))]
             (tls/save-tls-bundle! state-dir-str cert-pem key-pem)
             (let [fullchain (io/file state-dir "certs" "fullchain.pem")
-                  privkey (io/file state-dir "certs" "privkey.pem")]
+                  privkey (io/file state-dir "certs" "privkey.pem")
+                  bundle-edn (io/file state-dir "certs" "bundle.edn")]
               (is (.exists fullchain))
-              (is (.exists privkey)))
+              (is (.exists privkey))
+              (is (.exists bundle-edn)))
 
             (let [loaded (tls/load-tls-bundle state-dir-str)]
               (is (some? loaded))
@@ -109,7 +111,20 @@
               (is (instance? PrivateKey (:private-key loaded)))
               (is (= cert-pem (:cert-pem loaded)))
               (is (= key-pem (:key-pem loaded)))
-              (is (<= (abs (- (:expires-at bundle) (:expires-at loaded))) 1000)))))))))
+              (is (<= (abs (- (:expires-at bundle) (:expires-at loaded))) 1000)))
+
+            (testing "2-arity verifies expected domain"
+              (is (some? (tls/load-tls-bundle state-dir-str "save.domain.org")))
+              (is (nil? (tls/load-tls-bundle state-dir-str "other.domain.org"))))
+
+            (testing "Falls back to bundle.edn if fullchain.pem is missing"
+              (let [fullchain (io/file state-dir "certs" "fullchain.pem")]
+                (.delete fullchain)
+                (is (not (.exists fullchain)))
+                (let [fallback-loaded (tls/load-tls-bundle state-dir-str "save.domain.org")]
+                  (is (some? fallback-loaded))
+                  (is (= cert-pem (:cert-pem fallback-loaded)))
+                  (is (= key-pem (:key-pem fallback-loaded))))))))))))
 
 (deftest test-init-and-update-tls-manager
   (with-temp-state-dir
@@ -126,7 +141,7 @@
           (is (= state-dir-str (:state-dir mgr))))
 
         (testing "Update bundle swaps SSLContext and persists to disk"
-          (let [new-gen (tls/generate-self-signed-cert "renewed.domain.org" 60)
+          (let [new-gen (tls/generate-self-signed-cert "cold.domain.org" 60)
                 new-cert-pem (tls/encode-cert-chain-pem (:certificates new-gen))
                 new-key-pem (tls/encode-private-key-pem (:private-key new-gen))]
             (tls/update-tls-bundle! mgr new-cert-pem new-key-pem)
@@ -148,6 +163,23 @@
                 warm-bundle @(:bundle-atom warm-mgr)]
             (is (false? (:self-signed? warm-bundle)))
             (is (some? (:cert-pem warm-bundle)))))))))
+
+(deftest test-validate-tls-bundle
+  (testing "Rejects bundle when domain does not match"
+    (let [bundle (tls/generate-self-signed-cert "wrong.domain.org" 10)]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Certificate does not cover expected domain"
+                            (tls/validate-tls-bundle! (:certificates bundle) (:private-key bundle) "target.domain.org")))))
+
+  (testing "Rejects bundle when private key does not match certificate public key"
+    (let [bundle1 (tls/generate-self-signed-cert "target.domain.org" 10)
+          bundle2 (tls/generate-self-signed-cert "target.domain.org" 10)]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Private key signature verification failed"
+                            (tls/validate-tls-bundle! (:certificates bundle1) (:private-key bundle2) "target.domain.org")))))
+
+  (testing "Rejects expired bundle"
+    (let [bundle (tls/generate-self-signed-cert "target.domain.org" -1)]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Leaf certificate is expired or not yet valid"
+                            (tls/validate-tls-bundle! (:certificates bundle) (:private-key bundle) "target.domain.org"))))))
 
 (deftest test-make-https-configurator
   (let [bundle1 (tls/generate-self-signed-cert "cfg1.domain.org" 10)

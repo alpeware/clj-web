@@ -207,90 +207,96 @@
   "Decodes an RFC 1035 binary DNS packet into a Clojure map.
    Throws ex-info with {:type :dns/formerr} on malformed input."
   [^bytes buf]
-  (when (or (nil? buf) (< (alength buf) 12))
-    (throw (ex-info "Packet too short for DNS header (min 12 bytes)" {:type :dns/formerr})))
-  (let [id (read-ushort buf 0)
-        b2 (bit-and (aget buf 2) 0xFF)
-        qr? (not (zero? (bit-and b2 0x80)))
-        opcode (bit-shift-right (bit-and b2 0x78) 3)
-        aa? (not (zero? (bit-and b2 0x04)))
-        tc? (not (zero? (bit-and b2 0x02)))
-        rd? (not (zero? (bit-and b2 0x01)))
-        b3 (bit-and (aget buf 3) 0xFF)
-        ra? (not (zero? (bit-and b3 0x80)))
-        z (bit-shift-right (bit-and b3 0x70) 4)
-        rcode-val (bit-and b3 0x0F)
-        rcode (get int->rcode rcode-val rcode-val)
-        qdcount (read-ushort buf 4)
-        ancount (read-ushort buf 6)
-        nscount (read-ushort buf 8)
-        arcount (read-ushort buf 10)
-        len (alength buf)]
+  (let [id (when (and buf (>= (alength buf) 2))
+             (read-ushort buf 0))]
+    (when (or (nil? buf) (< (alength buf) 12))
+      (throw (ex-info "Packet too short for DNS header (min 12 bytes)"
+                      (cond-> {:type :dns/formerr}
+                        id (assoc :id id)))))
+    (try
+      (let [b2 (bit-and (aget buf 2) 0xFF)
+            qr? (not (zero? (bit-and b2 0x80)))
+            opcode (bit-shift-right (bit-and b2 0x78) 3)
+            aa? (not (zero? (bit-and b2 0x04)))
+            tc? (not (zero? (bit-and b2 0x02)))
+            rd? (not (zero? (bit-and b2 0x01)))
+            b3 (bit-and (aget buf 3) 0xFF)
+            ra? (not (zero? (bit-and b3 0x80)))
+            z (bit-shift-right (bit-and b3 0x70) 4)
+            rcode-val (bit-and b3 0x0F)
+            rcode (get int->rcode rcode-val rcode-val)
+            qdcount (read-ushort buf 4)
+            ancount (read-ushort buf 6)
+            nscount (read-ushort buf 8)
+            arcount (read-ushort buf 10)
+            len (alength buf)]
 
-    ;; Parse questions
-    (loop [i 0
-           offset 12
-           questions []]
-      (if (>= i qdcount)
-        ;; Parse resource records: answers, authority, additional
-        (let [parse-rrs (fn [count start-offset]
-                          (loop [j 0
-                                 cur-offset start-offset
-                                 rrs []]
-                            (if (>= j count)
-                              [rrs cur-offset]
-                              (let [[name next-off] (read-domain-name buf cur-offset)]
-                                (when (> (+ next-off 10) len)
-                                  (throw (ex-info "RR header truncated" {:type :dns/formerr})))
-                                (let [t-int (read-ushort buf next-off)
-                                      c-int (read-ushort buf (+ next-off 2))
-                                      ttl (read-uint buf (+ next-off 4))
-                                      rdlen (read-ushort buf (+ next-off 8))
-                                      rd-start (+ next-off 10)
-                                      rd-end (+ rd-start rdlen)]
-                                  (when (> rd-end len)
-                                    (throw (ex-info "RDATA truncated" {:type :dns/formerr})))
-                                  (let [t-kw (get int->type t-int t-int)
-                                        rdata (decode-rdata buf rd-start rdlen t-kw)]
-                                    (recur (inc j)
-                                           rd-end
-                                           (conj rrs {:name name
-                                                      :type t-kw
-                                                      :class (get int->class c-int c-int)
-                                                      :ttl ttl
-                                                      :rdata rdata}))))))))
-              [answers off-after-ans] (parse-rrs ancount offset)
-              [authority off-after-ns] (parse-rrs nscount off-after-ans)
-              [additional _off-final] (parse-rrs arcount off-after-ns)]
-          {:id id
-           :qr? qr?
-           :opcode opcode
-           :aa? aa?
-           :tc? tc?
-           :rd? rd?
-           :ra? ra?
-           :z z
-           :rcode rcode
-           :qdcount qdcount
-           :ancount ancount
-           :nscount nscount
-           :arcount arcount
-           :questions questions
-           :answers answers
-           :authority authority
-           :additional additional})
+        ;; Parse questions
+        (loop [i 0
+               offset 12
+               questions []]
+          (if (>= i qdcount)
+            ;; Parse resource records: answers, authority, additional
+            (let [parse-rrs (fn [count start-offset]
+                              (loop [j 0
+                                     cur-offset start-offset
+                                     rrs []]
+                                (if (>= j count)
+                                  [rrs cur-offset]
+                                  (let [[name next-off] (read-domain-name buf cur-offset)]
+                                    (when (> (+ next-off 10) len)
+                                      (throw (ex-info "RR header truncated" {:type :dns/formerr})))
+                                    (let [t-int (read-ushort buf next-off)
+                                          c-int (read-ushort buf (+ next-off 2))
+                                          ttl (read-uint buf (+ next-off 4))
+                                          rdlen (read-ushort buf (+ next-off 8))
+                                          rd-start (+ next-off 10)
+                                          rd-end (+ rd-start rdlen)]
+                                      (when (> rd-end len)
+                                        (throw (ex-info "RDATA truncated" {:type :dns/formerr})))
+                                      (let [t-kw (get int->type t-int t-int)
+                                            rdata (decode-rdata buf rd-start rdlen t-kw)]
+                                        (recur (inc j)
+                                               rd-end
+                                               (conj rrs {:name name
+                                                          :type t-kw
+                                                          :class (get int->class c-int c-int)
+                                                          :ttl ttl
+                                                          :rdata rdata}))))))))
+                  [answers off-after-ans] (parse-rrs ancount offset)
+                  [authority off-after-ns] (parse-rrs nscount off-after-ans)
+                  [additional _off-final] (parse-rrs arcount off-after-ns)]
+              {:id id
+               :qr? qr?
+               :opcode opcode
+               :aa? aa?
+               :tc? tc?
+               :rd? rd?
+               :ra? ra?
+               :z z
+               :rcode rcode
+               :qdcount qdcount
+               :ancount ancount
+               :nscount nscount
+               :arcount arcount
+               :questions questions
+               :answers answers
+               :authority authority
+               :additional additional})
 
-        (let [[qname next-off] (read-domain-name buf offset)]
-          (when (> (+ next-off 4) len)
-            (throw (ex-info "Question truncated" {:type :dns/formerr})))
-          (let [qtype-int (read-ushort buf next-off)
-                qclass-int (read-ushort buf (+ next-off 2))]
-            (recur (inc i)
-                   (+ next-off 4)
-                   (conj questions {:qname qname
-                                    :qname-lower (str/lower-case qname)
-                                    :qtype (get int->type qtype-int qtype-int)
-                                    :qclass (get int->class qclass-int qclass-int)}))))))))
+            (let [[qname next-off] (read-domain-name buf offset)]
+              (when (> (+ next-off 4) len)
+                (throw (ex-info "Question truncated" {:type :dns/formerr})))
+              (let [qtype-int (read-ushort buf next-off)
+                    qclass-int (read-ushort buf (+ next-off 2))]
+                (recur (inc i)
+                       (+ next-off 4)
+                       (conj questions {:qname qname
+                                        :qname-lower (str/lower-case qname)
+                                        :qtype (get int->type qtype-int qtype-int)
+                                        :qclass (get int->class qclass-int qclass-int)})))))))
+      (catch clojure.lang.ExceptionInfo e
+        (throw (ex-info (ex-message e) (assoc (ex-data e) :id id) e))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Domain Name Encoder (with RFC 1035 pointer compression & 0x20 case preservation)
@@ -331,11 +337,11 @@
   [^ByteArrayOutputStream bos comp-map-atom type-kw rdata base-offset]
   (case type-kw
     :A
-    (let [addr (InetAddress/getByName (str rdata))]
+    (let [addr (InetAddress/ofLiteral (str rdata))]
       (.write bos (.getAddress addr)))
 
     :AAAA
-    (let [addr (InetAddress/getByName (str rdata))]
+    (let [addr (InetAddress/ofLiteral (str rdata))]
       (.write bos (.getAddress addr)))
 
     :NS

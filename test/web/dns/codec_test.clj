@@ -175,6 +175,35 @@
       (is (= "example.com" (:qname (first (:questions decoded-udp)))))
       (is (empty? (:answers decoded-udp))))))
 
+(deftest test-malformed-packet-preserves-id
+  (testing "Malformed packet with >= 2 bytes throws :dns/formerr with :id in ex-data"
+    ;; A 4-byte truncated packet with id=0x1234 (4660)
+    (let [short-buf (byte-array [(byte 0x12) (byte 0x34) (byte 0x01) (byte 0x00)])]
+      (try
+        (codec/decode-packet short-buf)
+        (is false "Expected ExceptionInfo")
+        (catch clojure.lang.ExceptionInfo e
+          (let [d (ex-data e)]
+            (is (= :dns/formerr (:type d)))
+            (is (= 0x1234 (:id d))))))))
+
+  (testing "Corrupt question parsing throws :dns/formerr with :id in ex-data"
+    ;; 12-byte header with id=0xABCD (43981), qdcount=1, but 0 bytes of question data follows
+    (let [hdr-buf (byte-array [(unchecked-byte 0xAB) (unchecked-byte 0xCD) ;; id = 0xABCD
+                               (byte 0x01) (byte 0x00) ;; flags: standard query, rd=1
+                               (byte 0x00) (byte 0x01) ;; qdcount = 1
+                               (byte 0x00) (byte 0x00) ;; ancount = 0
+                               (byte 0x00) (byte 0x00) ;; nscount = 0
+                               (byte 0x00) (byte 0x00) ;; arcount = 0
+                               ])]
+      (try
+        (codec/decode-packet hdr-buf)
+        (is false "Expected ExceptionInfo")
+        (catch clojure.lang.ExceptionInfo e
+          (let [d (ex-data e)]
+            (is (= :dns/formerr (:type d)))
+            (is (= 0xABCD (:id d)))))))))
+
 ;; Property-based test
 (def gen-label
   (gen/such-that #(and (pos? (count %)) (<= (count %) 20))

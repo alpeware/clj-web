@@ -200,6 +200,23 @@
         (finally
           (.delete tmp-file))))))
 
+(deftest test-normalize-fingerprint
+  (let [valid-fp "AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99"
+        lower-fp (str/lower-case valid-fp)
+        with-prefix (str "SHA-256: " lower-fp)]
+    (testing "normalizes valid fingerprints with or without prefix and handles casing/whitespace"
+      (is (= valid-fp (cfg/normalize-fingerprint valid-fp)))
+      (is (= valid-fp (cfg/normalize-fingerprint (str "  " valid-fp "  "))))
+      (is (= valid-fp (cfg/normalize-fingerprint lower-fp)))
+      (is (= valid-fp (cfg/normalize-fingerprint with-prefix)))
+      (is (= valid-fp (cfg/normalize-fingerprint (str "sha-256:" valid-fp)))))
+
+    (testing "rejects invalid fingerprints"
+      (is (thrown? clojure.lang.ExceptionInfo (cfg/normalize-fingerprint nil)))
+      (is (thrown? clojure.lang.ExceptionInfo (cfg/normalize-fingerprint "")))
+      (is (thrown? clojure.lang.ExceptionInfo (cfg/normalize-fingerprint "not-a-fingerprint")))
+      (is (thrown? clojure.lang.ExceptionInfo (cfg/normalize-fingerprint "AA:BB:CC"))))))
+
 ;; Property-based test
 (def gen-valid-domain
   (gen/fmap (fn [[name tld]]

@@ -61,6 +61,24 @@
     (throw (ex-info (str "Field " field-name " must be a non-blank string: " (pr-str s))
                     {:field field-name :value s}))))
 
+(def ^:private fingerprint-regex #"^[0-9A-F]{2}(:[0-9A-F]{2}){31}$")
+
+(defn normalize-fingerprint
+  "Trims whitespace, strips an optional case-insensitive 'SHA-256:' prefix,
+   uppercases it, and validates that it matches 32-byte hex format (XX:XX:...).
+   Throws ex-info if invalid."
+  [fp]
+  (when-not (string? fp)
+    (throw (ex-info "Fingerprint must be a string" {:fingerprint fp})))
+  (let [cleaned (-> fp
+                    str/trim
+                    (str/replace-first #"(?i)^SHA-256:\s*" "")
+                    str/upper-case)]
+    (when-not (re-matches fingerprint-regex cleaned)
+      (throw (ex-info (str "Invalid SHA-256 fingerprint format: " (pr-str fp))
+                      {:fingerprint fp :normalized cleaned})))
+    cleaned))
+
 (defn normalize-config
   "Validates and normalizes raw configuration map, populating defaults.
    Validates required :node/id (keyword) and :domain (non-blank lowercased string).
@@ -100,16 +118,27 @@
               cluster-nodes (get cluster-cfg :nodes (get-in default-config [:cluster :nodes]))
               _ (when-not (map? cluster-nodes)
                   (throw (ex-info ":cluster :nodes must be a map" {:nodes cluster-nodes})))
-              _ (doseq [[n-id n-info] cluster-nodes]
-                  (when (and (map? n-info) (contains? n-info :port))
-                    (validate-port! (keyword "cluster.nodes" (name n-id)) (:port n-info))))
+              require-fps? (get cluster-cfg :require-fingerprints? false)
+              normalized-nodes
+              (into {}
+                    (map (fn [[n-id n-info]]
+                           (when (and (map? n-info) (contains? n-info :port))
+                             (validate-port! (keyword "cluster.nodes" (name n-id)) (:port n-info)))
+                           (let [raw-fp (:fingerprint n-info)]
+                             (when (and require-fps? (not= n-id node-id) (str/blank? (str raw-fp)))
+                               (throw (ex-info (str "Missing required fingerprint for remote peer: " (pr-str n-id))
+                                               {:node-id n-id :node-info n-info})))
+                             [n-id (if (some? raw-fp)
+                                     (assoc n-info :fingerprint (normalize-fingerprint raw-fp))
+                                     n-info)])))
+                    cluster-nodes)
               cluster (merge (:cluster default-config)
                              cluster-cfg
                              {:bind-ip cluster-bind-ip
                               :port cluster-port
                               :heartbeat-interval-ms hb-interval
                               :heartbeat-timeout-ms hb-timeout
-                              :nodes cluster-nodes})
+                              :nodes normalized-nodes})
 
               ;; DNS
               dns-cfg (:dns raw-cfg {})

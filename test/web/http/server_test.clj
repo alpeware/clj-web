@@ -216,20 +216,56 @@
             acme-atom (atom {})
             servers (server/start-http-servers! cfg tls-mgr acme-atom)]
         (try
-          (testing "Initial connection presents initial certificate"
-            (let [^X509Certificate cert (get-peer-cert "127.0.0.1" https-port)
-                  subject (.getName (.getSubjectX500Principal cert))]
-              (is (.contains subject "CN=initial.domain.org"))))
+          (let [^X509Certificate initial-cert (get-peer-cert "127.0.0.1" https-port)]
+            (testing "Initial connection presents initial certificate"
+              (let [subject (.getName (.getSubjectX500Principal initial-cert))]
+                (is (.contains subject "CN=initial.domain.org"))))
 
-          (testing "Hot-reloading TLS bundle updates presented certificate immediately without restarting server"
-            (let [new-bundle (tls/generate-self-signed-cert "reloaded.domain.org" 30)
-                  cert-pem (tls/encode-cert-chain-pem (:certificates new-bundle))
-                  key-pem (tls/encode-private-key-pem (:private-key new-bundle))]
-              (tls/update-tls-bundle! tls-mgr cert-pem key-pem)
+            (testing "Hot-reloading TLS bundle updates presented certificate immediately without restarting server"
+              (let [new-bundle (tls/generate-self-signed-cert "initial.domain.org" 60)
+                    cert-pem (tls/encode-cert-chain-pem (:certificates new-bundle))
+                    key-pem (tls/encode-private-key-pem (:private-key new-bundle))]
+                (tls/update-tls-bundle! tls-mgr cert-pem key-pem)
 
-              (let [^X509Certificate reloaded-cert (get-peer-cert "127.0.0.1" https-port)
-                    reloaded-subject (.getName (.getSubjectX500Principal reloaded-cert))]
-                (is (.contains reloaded-subject "CN=reloaded.domain.org")))))
+                (let [^X509Certificate reloaded-cert (get-peer-cert "127.0.0.1" https-port)
+                      reloaded-subject (.getName (.getSubjectX500Principal reloaded-cert))]
+                  (is (.contains reloaded-subject "CN=initial.domain.org"))
+                  (is (not= (.getSerialNumber initial-cert) (.getSerialNumber reloaded-cert)))))))
+
+          (finally
+            (server/stop-http-servers! servers)))))))
+
+(deftest test-https-monthly-egress-limiting
+  (with-temp-env
+    (fn [^File state-dir ^File content-dir]
+      (let [http-port (find-free-port)
+            https-port (find-free-port)
+            cfg {:state-dir (.getAbsolutePath state-dir)
+                 :domain "egress-test.domain.org"
+                 :http {:bind-ip "127.0.0.1"
+                        :http-port http-port
+                        :https-port https-port
+                        :content-root (.getAbsolutePath content-dir)}}
+            tls-mgr (tls/init-tls-manager! cfg)
+            acme-atom (atom {})
+            servers (server/start-http-servers! cfg tls-mgr acme-atom)
+            client (make-http-client)
+            doc-file (io/file content-dir "test.txt")]
+        (spit doc-file "monthly egress limit test payload")
+        ;; Set monthly egress limit artificially to 10 bytes so the first request exhausts/exceeds it
+        (reset! (:limiter-atom servers)
+                {:capacity 100.0
+                 :refill-per-sec 10.0
+                 :monthly-egress-limit-bytes 10
+                 :buckets {}
+                 :egress-by-month {}})
+        (try
+          (testing "Returns 429 when monthly egress limit is exceeded"
+            (let [uri (URI/create (str "https://127.0.0.1:" https-port "/test.txt"))
+                  req (-> (HttpRequest/newBuilder uri) (.GET) (.build))
+                  resp (.send client req (HttpResponse$BodyHandlers/ofString))]
+              (is (= 429 (.statusCode resp)))
+              (is (= "Monthly egress limit exceeded\n" (.body resp)))))
 
           (finally
             (server/stop-http-servers! servers)))))))

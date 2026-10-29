@@ -19,7 +19,7 @@
      :ttl (get dns-cfg :ttl-seconds 60)
      :rdata {:mname (str "ns1." domain)
              :rname (get dns-cfg :hostmaster (str "hostmaster." domain))
-             :serial (get dns-cfg :serial 2026102901)
+             :serial (get dns-cfg :serial (quot (System/currentTimeMillis) 1000))
              :refresh 3600
              :retry 600
              :expire 604800

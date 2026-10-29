@@ -239,14 +239,24 @@
                                (map? body) (or (:length body) 0)
                                (instance? File body) (.length ^File body)
                                :else 0)]
-                ;; Record egress bytes
-                (when (pos? body-len)
+                ;; Record egress bytes and check monthly egress limit
+                (if (pos? body-len)
                   (let [sdf (SimpleDateFormat. "yyyy-MM")
-                        month-key (.format sdf (Date. now-ms))]
+                        month-key (.format sdf (Date. now-ms))
+                        allowed? (atom true)]
                     (swap! limiter-atom
                            (fn [st]
-                             (:state (rl/record-egress st body-len month-key))))))
-                (send-response exchange hsts-resp)))))))))
+                             (let [res (rl/record-egress st body-len month-key)]
+                               (reset! allowed? (:allowed? res))
+                               (:state res))))
+                    (if-not @allowed?
+                      (send-response exchange
+                                     {:response/status 429
+                                      :response/headers {"Content-Type" "text/plain; charset=utf-8"
+                                                         "Retry-After" "3600"}
+                                      :response/body "Monthly egress limit exceeded\n"})
+                      (send-response exchange hsts-resp)))
+                  (send-response exchange hsts-resp))))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Server Lifecycle

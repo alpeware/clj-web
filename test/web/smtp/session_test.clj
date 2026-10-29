@@ -98,6 +98,13 @@
         (is (= :mail (:state st)))
         (is (= "alice@sender.org" (:mail-from st)))))
 
+    (testing "Bare MAIL FROM without angle brackets sets reverse-path"
+      (let [res (session/handle-smtp-line s "MAIL FROM:alice@sender.org")
+            st (:state res)]
+        (is (= ["250 2.1.0 OK"] (:responses res)))
+        (is (= :mail (:state st)))
+        (is (= "alice@sender.org" (:mail-from st)))))
+
     (testing "MAIL FROM with bounce sender <>"
       (let [res (session/handle-smtp-line s "MAIL FROM:<>")
             st (:state res)]
@@ -122,6 +129,18 @@
         (is (= ["250 2.1.5 OK"] (:responses res)))
         (is (= :rcpt (:state st)))
         (is (= ["admin@example.com"] (:rcpt-to st)))))
+
+    (testing "Bare RCPT TO without angle brackets accepted when allowed"
+      (let [res (session/handle-smtp-line s "RCPT TO:admin@example.com")
+            st (:state res)]
+        (is (= ["250 2.1.5 OK"] (:responses res)))
+        (is (= :rcpt (:state st)))
+        (is (= ["admin@example.com"] (:rcpt-to st)))))
+
+    (testing "Empty allowed-recipients set rejects all recipients (fail-closed)"
+      (let [empty-allow-s (assoc s :allowed-recipients #{})
+            res (session/handle-smtp-line empty-allow-s "RCPT TO:<admin@example.com>")]
+        (is (= ["550 5.7.1 Relay access denied"] (:responses res)))))
 
     (testing "Disallowed recipient (open relay attempt) rejected with 550"
       (let [res (session/handle-smtp-line s "RCPT TO:<victim@otherdomain.com>")
@@ -179,7 +198,20 @@
             d1 (session/handle-smtp-line small-s "This is a line that exceeds the 30 byte limit")
             finish (session/handle-smtp-line (:state d1) ".")]
         (is (= ["552 5.3.4 Message size exceeds fixed maximum"] (:responses finish)))
-        (is (empty? (:effects finish)))))))
+        (is (empty? (:effects finish)))))
+
+    (testing "Mid-stream DATA memory bound and early abort"
+      (let [max-bytes 100
+            small-s (assoc s :state :reading-data :data-lines [] :data-bytes 0 :max-message-bytes max-bytes)
+            ;; First line exceeds max-message-bytes, so data-lines is cleared to bound memory
+            d1 (session/handle-smtp-line small-s (apply str (repeat 120 "A")))
+            st1 (:state d1)]
+        (is (true? (:over-size? st1)))
+        (is (empty? (:data-lines st1)))
+        ;; Second line pushes total bytes past 2 * max-message-bytes (200 bytes), triggering early abort with 552 and :close
+        (let [d2 (session/handle-smtp-line st1 (apply str (repeat 100 "B")))]
+          (is (= ["552 5.3.4 Message size exceeds fixed maximum"] (:responses d2)))
+          (is (= [{:type :close}] (:effects d2))))))))
 
 (deftest test-control-commands
   (let [s (-> (session/init-session {:domain "example.com"})

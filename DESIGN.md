@@ -132,7 +132,7 @@ To make the three VMs self-hosting nameservers for `<domain>` (e.g., `alpeware.c
 
 The 3 nodes form a static full mesh (3 bidirectional peer connections total) over **UDP port 5000** using `datachannel-clj`:
 - **Static Signalingless Bootstrap**: Because all 3 VMs have static IPs known in `config.edn`, no external signaling server is required. For each pair of nodes $(i, j)$ with $i < j$, node $i$ initiates with `:setup "active"` and node $j$ listens with `:setup "passive"`.
-- **Mutual Authentication via DTLS Fingerprints**: Each node holds a persistent node identity keypair (`/var/lib/clj-web/cluster/node.key`). `config.edn` lists the expected SHA-256 certificate fingerprint (`:fingerprint`) of all 3 nodes. Any UDP/DTLS peer whose certificate fingerprint does not match the allowlist is rejected during handshake.
+- **Mutual Authentication via DTLS Fingerprints**: Each node holds a persistent node identity keypair (`/var/lib/clj-web/cluster/node-identity.edn`). `config.edn` lists the expected SHA-256 certificate fingerprint (`:fingerprint`) of all 3 nodes. Authentication is strictly fail-closed: fingerprints are normalized (whitespace trimmed, optional case-insensitive `SHA-256:` prefix stripped, uppercased to 32 hex pairs), and if missing, blank, or mismatched, the handshake is rejected.
 - **Data Channels**: Once connected, nodes open an ordered, reliable SCTP channel (`"control"`, `:ordered true`) for leader election, TLS keypair distribution, and inbound email replication, plus an unordered channel (`"heartbeat"`, `:ordered false :max-retransmits 0`) for low-overhead liveness probes.
 
 ### 4.2 Deterministic Leader Election & Liveness
@@ -274,11 +274,11 @@ Content is served from a configured root directory (e.g., `/var/www/clj-web/publ
   :heartbeat-interval-ms 5000
   :heartbeat-timeout-ms 15000
   :nodes {:ns1 {:ip4 "34.10.10.1" :ip6 nil :port 5000
-                :fingerprint "SHA-256:AA:BB:..."}
+                :fingerprint "AA:BB:..."}      ;; Canonical bare hex; optional "SHA-256:" prefix also accepted
           :ns2 {:ip4 "34.10.10.2" :ip6 nil :port 5000
-                :fingerprint "SHA-256:CC:DD:..."}
+                :fingerprint "CC:DD:..."}
           :ns3 {:ip4 "34.10.10.3" :ip6 nil :port 5000
-                :fingerprint "SHA-256:EE:FF:..."}}}
+                :fingerprint "EE:FF:..."}}}
 
  :dns
  {:bind-ip "0.0.0.0"
