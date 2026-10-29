@@ -26,7 +26,11 @@
   ([raw-or-normalized-config]
    (start-node! raw-or-normalized-config {}))
   ([raw-or-normalized-config opts]
-   (let [cfg (config/normalize-config raw-or-normalized-config)
+   (let [raw-cfg (if (and (= (get-in opts [:cluster-opts :transport]) :in-memory)
+                          (not (contains? (:cluster raw-or-normalized-config) :require-fingerprints?)))
+                   (assoc-in raw-or-normalized-config [:cluster :allow-unauthenticated?] true)
+                   raw-or-normalized-config)
+         cfg (config/normalize-config raw-cfg)
          acme-challenges-atom (atom {})
          tls-manager (tls/init-tls-manager! cfg)
          cluster-mgr (mesh/start-cluster! cfg tls-manager acme-challenges-atom (:cluster-opts opts {}))

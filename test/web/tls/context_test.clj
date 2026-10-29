@@ -179,7 +179,18 @@
   (testing "Rejects expired bundle"
     (let [bundle (tls/generate-self-signed-cert "target.domain.org" -1)]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Leaf certificate is expired or not yet valid"
-                            (tls/validate-tls-bundle! (:certificates bundle) (:private-key bundle) "target.domain.org"))))))
+                            (tls/validate-tls-bundle! (:certificates bundle) (:private-key bundle) "target.domain.org")))))
+
+  (testing "Wildcard SAN matching adheres to RFC 6125 single-level label rule"
+    (let [bundle (tls/generate-self-signed-cert "*.example.com" 10)]
+      ;; Single-level matches
+      (is (true? (tls/validate-tls-bundle! (:certificates bundle) (:private-key bundle) "sub.example.com")))
+      ;; Multi-level does not match (rejects with ex-info)
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Certificate does not cover expected domain"
+                            (tls/validate-tls-bundle! (:certificates bundle) (:private-key bundle) "a.b.example.com")))
+      ;; Bare apex domain does not match
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Certificate does not cover expected domain"
+                            (tls/validate-tls-bundle! (:certificates bundle) (:private-key bundle) "example.com"))))))
 
 (deftest test-make-https-configurator
   (let [bundle1 (tls/generate-self-signed-cert "cfg1.domain.org" 10)

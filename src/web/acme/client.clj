@@ -289,25 +289,45 @@
 (defn start-acme-loop!
   "Starts background renewal check ticker on scheduled executor.
    Automatically triggers certificate provisioning when this node is cluster leader
-   and certificate needs renewal."
+   and certificate needs renewal. Applies exponential backoff on failure."
   ([config cluster-mgr tls-manager]
    (start-acme-loop! config cluster-mgr tls-manager {}))
   ([config cluster-mgr tls-manager opts]
    (let [running? (AtomicBoolean. true)
          executor (Executors/newSingleThreadScheduledExecutor)
          interval-ms (long (or (:check-interval-ms opts) 3600000))
+         base-backoff-ms (long (or (:backoff-base-ms opts) 60000))
+         on-error (:on-error opts)
+         retry-state (atom {:consecutive-failures 0
+                            :next-attempt-ms 0})
          task (fn []
                 (when (.get running?)
-                  (try
-                    (let [leader? (if cluster-mgr
-                                    (= :leader (:role @(:state-atom cluster-mgr)))
-                                    true)
-                          now (System/currentTimeMillis)]
-                      (when (and leader? (needs-renewal? config tls-manager now))
-                        (provision-certificate! config cluster-mgr tls-manager opts)))
-                    (catch Exception e
-                      (binding [*out* *err*]
-                        (println (str "Error in ACME renewal loop: " (.getMessage e))))))))]
+                  (let [now (System/currentTimeMillis)
+                        {:keys [consecutive-failures next-attempt-ms]} @retry-state]
+                    (when (>= now (long next-attempt-ms))
+                      (let [leader? (if cluster-mgr
+                                      (= :leader (:role @(:state-atom cluster-mgr)))
+                                      true)]
+                        (when (and leader? (needs-renewal? config tls-manager now))
+                          (try
+                            (provision-certificate! config cluster-mgr tls-manager opts)
+                            (swap! retry-state assoc :consecutive-failures 0 :next-attempt-ms 0)
+                            (catch Exception e
+                              (let [failures (inc (long consecutive-failures))
+                                    backoff-delay (min 86400000 (* base-backoff-ms (bit-shift-left 1 (min failures 10))))
+                                    next-attempt (+ now backoff-delay)]
+                                (swap! retry-state assoc
+                                       :consecutive-failures failures
+                                       :next-attempt-ms next-attempt)
+                                (binding [*out* *err*]
+                                  (println (str "Error in ACME renewal loop (failure #" failures
+                                                ", next retry in " backoff-delay "ms): " (.getMessage e))))
+                                (when (fn? on-error)
+                                  (try
+                                    (on-error e failures)
+                                    (catch Exception err-handler-ex
+                                      (binding [*out* *err*]
+                                        (println (str "Error in ACME on-error handler: " (.getMessage err-handler-ex))))))))))))))))]
      (.scheduleWithFixedDelay ^ScheduledExecutorService executor
                               ^Runnable task
                               0
@@ -318,6 +338,7 @@
       :tls-manager tls-manager
       :executor executor
       :running? running?
+      :retry-state retry-state
       :stop-fn (fn []
                  (.set running? false)
                  (try (.shutdownNow ^ScheduledExecutorService executor) (catch Exception _ nil)))})))

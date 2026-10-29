@@ -10,7 +10,8 @@
   (cfg/normalize-config
    {:node/id :ns1
     :domain "example.com"
-    :cluster {:nodes {:ns1 {:ip4 "34.10.10.1" :ip6 "2001:db8::1"}
+    :cluster {:allow-unauthenticated? true
+              :nodes {:ns1 {:ip4 "34.10.10.1" :ip6 "2001:db8::1"}
                       :ns2 {:ip4 "34.10.10.2" :ip6 "2001:db8::2"}
                       :ns3 {:ip4 "34.10.10.3" :ip6 nil}}}
     :dns {:ttl-seconds 60

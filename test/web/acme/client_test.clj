@@ -265,6 +265,30 @@
           (client/stop-acme-loop! acme-loop)
           (is (false? (.get ^java.util.concurrent.atomic.AtomicBoolean (:running? acme-loop))))))
 
+      (testing "start-acme-loop! triggers (:on-error opts) callback and tracks exponential backoff on failure"
+        (let [error-atom (atom nil)
+              bad-config (-> config
+                             (assoc-in [:acme :directory-url] "http://127.0.0.1:1/directory")
+                             (assoc-in [:acme :renew-before-days] 365))
+              fresh-tls-mgr (tls/init-tls-manager! {:state-dir (str temp-dir "/fresh-acme") :domain "example.com"})
+              acme-loop (client/start-acme-loop! bad-config cluster-mgr fresh-tls-mgr
+                                                 {:check-interval-ms 20
+                                                  :backoff-base-ms 50
+                                                  :on-error (fn [e failures]
+                                                              (reset! error-atom {:ex e :failures failures}))})]
+          (try
+            (let [deadline (+ (System/currentTimeMillis) 2000)]
+              (while (and (nil? @error-atom) (< (System/currentTimeMillis) deadline))
+                (Thread/sleep 20)))
+            (is (some? @error-atom))
+            (is (instance? Exception (:ex @error-atom)))
+            (is (pos? (long (:failures @error-atom))))
+            (let [st @(:retry-state acme-loop)]
+              (is (pos? (:consecutive-failures st)))
+              (is (> (:next-attempt-ms st) 0)))
+            (finally
+              (client/stop-acme-loop! acme-loop)))))
+
       (finally
         ((:stop-fn mock-server))
         (mesh/stop-cluster! cluster-mgr)

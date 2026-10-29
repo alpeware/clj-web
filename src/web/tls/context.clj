@@ -30,7 +30,10 @@
      (let [x500 (sun.security.x509.X500Name. (str "CN=" domain))
            exts (sun.security.x509.CertificateExtensions.)
            gn (sun.security.x509.GeneralNames.)
-           _ (.add gn (sun.security.x509.GeneralName. (sun.security.x509.DNSName. (or domain "localhost"))))
+           _ (when (and domain (not (str/starts-with? domain "*")))
+               (try
+                 (.add gn (sun.security.x509.GeneralName. (sun.security.x509.DNSName. domain)))
+                 (catch Exception _ nil)))
            _ (.add gn (sun.security.x509.GeneralName. (sun.security.x509.DNSName. "localhost")))
            _ (.add gn (sun.security.x509.GeneralName. (sun.security.x509.IPAddressName. "127.0.0.1")))
            san-ext (sun.security.x509.SubjectAlternativeNameExtension. gn)
@@ -152,7 +155,11 @@
          (some (fn [pattern]
                  (when (str/starts-with? pattern "*.")
                    (let [suffix (subs pattern 1)]
-                     (str/ends-with? expected suffix))))
+                     (and (> (count expected) (count suffix))
+                          (str/ends-with? expected suffix)
+                          (let [prefix (subs expected 0 (- (count expected) (count suffix)))]
+                            (and (pos? (count prefix))
+                                 (not (str/includes? prefix "."))))))))
                names)))))
 
 (defn validate-tls-bundle!
@@ -160,8 +167,11 @@
    - Verifies certs and priv-key are present.
    - Verifies leaf cert is not expired and within valid time window.
    - Verifies priv-key mathematically matches leaf certificate public key via signing.
-   - Verifies cert covers expected-domain (if non-blank).
-   - Verifies certificate chain signatures if multiple certs are provided.
+   - Verifies cert covers expected-domain (if non-blank) adhering to RFC 6125 §6.4.3 single-level wildcard matching.
+   - Verifies certificate chain signatures if multiple certs are provided (child signed by issuer).
+   Trusts the authenticated DTLS cluster leader or configured ACME CA as the root trust anchor
+   rather than pinning a static root CA store (allowing Let's Encrypt staging, custom ACME roots,
+   and local self-signed certs).
    Throws ex-info on any validation failure."
   [certs ^PrivateKey priv-key expected-domain]
   (when (or (empty? certs) (nil? priv-key))

@@ -178,6 +178,10 @@ sequenceDiagram
 > **Why include `ns1..ns3.<domain>` in the certificate SANs?**
 > Including `ns1.<domain>`, `ns2.<domain>`, and `ns3.<domain>` as Subject Alternative Names alongside `<domain>` means our inbound SMTP `STARTTLS` listener on each node (`MX 10 ns1.<domain>`, etc.) presents a valid, hostname-matching Let's Encrypt certificate to sending mail servers (such as Namecheap, Google, or GitHub)!
 
+> [!NOTE]
+> **Trust Anchors and Bundle Validation**
+> `validate-tls-bundle!` verifies leaf expiry, private-to-public key signature match, SAN/CN domain coverage (including RFC 6125 §6.4.3 single-level wildcard matching), and intermediate chain signatures (`child` signed by `issuer`), while trusting the authenticated DTLS cluster leader or configured ACME CA as the root trust anchor rather than pinning a static root CA store (allowing Let's Encrypt staging, custom ACME roots, and local self-signed certs).
+
 ---
 
 ## 5. ACME v2 Client & Zero-Downtime TLS (`web.acme.*`, `web.tls.*`)
@@ -224,8 +228,8 @@ To receive verification emails from domain registrars (e.g., Namecheap whois/dom
   - `EHLO <domain>` / `HELO <domain>` $\rightarrow$ Advertises `250-STARTTLS`, `250-SIZE 131072`, `250 8BITMIME`.
   - `STARTTLS` $\rightarrow$ Returns `220 2.0.0 Ready to start TLS` and emits `{:effect :upgrade-tls}` so `web.smtp.server` wraps the socket in an `SSLSocket` using `@ssl-context-atom` and resets the envelope state.
   - `MAIL FROM:<reverse-path>` $\rightarrow$ Validates syntax and optional `SIZE=` parameter against `:max-message-bytes` (default `128 KB`).
-  - `RCPT TO:<forward-path>` $\rightarrow$ **Strict Open-Relay Prevention**: Extracts the lowercase recipient address (`user@domain`) and checks against `:smtp/allowed-recipients` (e.g., `#{"admin@example.com" "hostmaster@example.com" "postmaster@example.com" "security@example.com"}` or `@example.com` catch-all if configured). Any recipient outside `<domain>` or not in the allowlist is immediately rejected with `550 5.7.1 Relay access denied`.
-  - `DATA` $\rightarrow$ Transitions to `:reading-data` mode until `<CRLF>.<CRLF>` (handling leading-dot unstuffing per RFC 5321 §4.5.2). If incoming bytes exceed `:max-message-bytes` (`128 KB`), aborts and returns `552 5.3.4 Message size exceeds fixed maximum`.
+  - `RCPT TO:<forward-path>` $\rightarrow$ **Strict Open-Relay Prevention**: Extracts the lowercase recipient address (`user@domain`) and checks against `:smtp/allowed-recipients` (e.g., `#{"admin@example.com" "postmaster@example.com"}` or domain catch-all opt-in `"@example.com"`). Open relay wildcards (`*` or `:all`) are strictly rejected; only explicitly listed addresses or addresses within the server's own domain matching the `"@<domain>"` catch-all pattern are accepted. Any out-of-domain recipient or non-allowlisted address is immediately rejected with `550 5.7.1 Relay access denied`.
+  - `DATA` $\rightarrow$ Transitions to `:reading-data` mode until `<CRLF>.<CRLF>` (handling leading-dot unstuffing per RFC 5321 §4.5.2). Incoming lines are bounded to a maximum of 4,096 characters. Line buffering stops once `:max-message-bytes` (default `128 KB`) is exceeded (rejecting with `552` at terminal `.`), and connections are immediately aborted and closed mid-stream with `552 5.3.4 Message size exceeds fixed maximum` if incoming data exceeds $2 \times$ `:max-message-bytes` (`256 KB`).
   - `RSET`, `NOOP`, `QUIT`, `VRFY` (`252 2.5.2 Cannot VRFY user`).
 
 ### 6.3 Storage, Replication & Protection (`web.smtp.server`)
@@ -302,7 +306,9 @@ Content is served from a configured root directory (e.g., `/var/www/clj-web/publ
   :allowed-recipients #{"admin@example.com"
                         "hostmaster@example.com"
                         "postmaster@example.com"
-                        "security@example.com"}}
+                        "security@example.com"
+                        ;; Optional domain catch-all: "@example.com" (accepts any recipient at this domain)
+                        }}
 
  :acme
  {:enabled? true

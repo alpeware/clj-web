@@ -54,7 +54,8 @@
           config (cfg/normalize-config
                   {:node/id :ns1
                    :domain "example.com"
-                   :cluster {:nodes {:ns1 {:ip4 "127.0.0.1" :ip6 nil}
+                   :cluster {:allow-unauthenticated? true
+                             :nodes {:ns1 {:ip4 "127.0.0.1" :ip6 nil}
                                      :ns2 {:ip4 "127.0.0.2" :ip6 nil}}}
                    :dns {:bind-ip "127.0.0.1"
                          :port port

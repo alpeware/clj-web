@@ -115,7 +115,7 @@
 
 (deftest test-normalize-config-custom-overrides
   (testing "custom settings merge properly without losing other defaults"
-    (let [cfg (cfg/normalize-config {:node/id :ns3
+    (let [cfg (cfg/normalize-config {:node/id :ns1
                                      :domain "alpeware.dev"
                                      :state-dir "/custom/state"
                                      :cluster {:port 6000
@@ -172,7 +172,28 @@
     ;; Non-negative/positive integer checks
     (is (thrown? clojure.lang.ExceptionInfo (cfg/normalize-config {:node/id :ns1 :domain "example.com" :dns {:ttl-seconds -1}})))
     (is (thrown? clojure.lang.ExceptionInfo (cfg/normalize-config {:node/id :ns1 :domain "example.com" :cluster {:heartbeat-interval-ms 0}})))
-    (is (thrown? clojure.lang.ExceptionInfo (cfg/normalize-config {:node/id :ns1 :domain "example.com" :smtp {:max-message-bytes -100}})))))
+    (is (thrown? clojure.lang.ExceptionInfo (cfg/normalize-config {:node/id :ns1 :domain "example.com" :smtp {:max-message-bytes -100}})))
+
+    ;; Cluster peer fingerprint checks (default require-fingerprints? true)
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (cfg/normalize-config {:node/id :ns1 :domain "example.com"
+                                        :cluster {:nodes {:ns1 {:port 5000}
+                                                          :ns2 {:port 5001}}}})))
+    (is (some? (cfg/normalize-config {:node/id :ns1 :domain "example.com"
+                                      :cluster {:require-fingerprints? false
+                                                :nodes {:ns1 {:port 5000}
+                                                        :ns2 {:port 5001}}}})))
+
+    ;; Node IP literal checks
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Invalid IPv4 literal"
+                          (cfg/normalize-config {:node/id :ns1 :domain "example.com"
+                                                 :cluster {:nodes {:ns1 {:port 5000 :ip4 "ns1.example.com"}}}})))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Invalid IPv4 literal"
+                          (cfg/normalize-config {:node/id :ns1 :domain "example.com"
+                                                 :cluster {:nodes {:ns1 {:port 5000 :ip4 "999.999.999.999"}}}})))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Invalid IPv6 literal"
+                          (cfg/normalize-config {:node/id :ns1 :domain "example.com"
+                                                 :cluster {:nodes {:ns1 {:port 5000 :ip6 "not:an:ipv6"}}}})))))
 
 (deftest test-load-config-from-disk
   (testing "load-config reads EDN file from disk and normalizes it"

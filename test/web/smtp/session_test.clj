@@ -155,6 +155,13 @@
         (is (= ["250 2.1.5 OK"] (:responses res)))
         (is (= ["anyone@example.com"] (get-in res [:state :rcpt-to])))))
 
+    (testing "Open relay footguns (* and :all) do not allow out-of-domain relay"
+      (let [star-s (-> (session/init-session {:domain "example.com" :allowed-recipients #{"*" :all}})
+                       (assoc :helo "client.org" :mail-from "alice@sender.org" :state :mail))
+            res (session/handle-smtp-line star-s "RCPT TO:<victim@otherdomain.com>")]
+        (is (= ["550 5.7.1 Relay access denied"] (:responses res)))
+        (is (empty? (:rcpt-to (get res :state))))))
+
     (testing "Too many recipients (limit 16) returns 452"
       (let [full-rcpt (vec (repeat 16 "admin@example.com"))
             full-s (assoc s :rcpt-to full-rcpt :state :rcpt)

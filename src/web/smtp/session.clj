@@ -16,7 +16,12 @@
   ([opts]
    (let [domain (or (:domain opts) "localhost")
          max-bytes (long (or (:max-message-bytes opts) 131072))
-         recipients (set (map (comp str/lower-case str/trim) (or (:allowed-recipients opts) [])))
+         recipients (set (keep (fn [r]
+                                 (when r
+                                   (-> (if (keyword? r) (name r) (str r))
+                                       (str/trim)
+                                       (str/lower-case))))
+                               (or (:allowed-recipients opts) [])))
          tls? (boolean (:tls-active? opts))]
      {:state :connected
       :domain domain
@@ -37,14 +42,16 @@
    :responses [(str "220 " (:domain session-state) " ESMTP clj-web ready")]})
 
 (defn- recipient-allowed?
-  "Checks if recipient address is allowed by configuration to prevent open relay."
+  "Checks if recipient address is allowed by configuration to prevent open relay.
+   Only accepts exact addresses in allowed-recipients or addresses at @<domain>
+   when (str \"@\" domain-lower) is in allowed-recipients. Never allows out-of-domain relay."
   [allowed-recipients domain addr]
   (let [addr-lower (str/lower-case (or addr ""))
-        domain-lower (str/lower-case (or domain ""))]
+        domain-lower (str/lower-case (or domain ""))
+        domain-suffix (str "@" domain-lower)]
     (or (contains? allowed-recipients addr-lower)
-        (contains? allowed-recipients (str "@" domain-lower))
-        (contains? allowed-recipients "*")
-        (contains? allowed-recipients :all))))
+        (and (str/ends-with? addr-lower domain-suffix)
+             (contains? allowed-recipients domain-suffix)))))
 
 (defn- parse-mail-from-line
   "Parses reverse-path and optional SIZE= parameter from MAIL FROM line."

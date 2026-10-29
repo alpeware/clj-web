@@ -212,16 +212,15 @@
 
           :else
           ;; Rate limit check
-          (let [allowed? (atom true)
-                retry-after-ms (atom 0)]
-            (swap! limiter-atom
-                   (fn [st]
-                     (let [res (rl/check-and-consume st subnet-key 1.0 now-ms)]
-                       (reset! allowed? (:allowed? res))
-                       (reset! retry-after-ms (:retry-after-ms res))
-                       (:state res))))
-            (if-not @allowed?
-              (let [retry-secs (max 1 (long (Math/ceil (/ @retry-after-ms 1000.0))))]
+          (let [swapped-state (swap! limiter-atom
+                                     (fn [st]
+                                       (let [res (rl/check-and-consume st subnet-key 1.0 now-ms)]
+                                         (with-meta (:state res) (dissoc res :state)))))
+                meta-res (meta swapped-state)
+                allowed? (:allowed? meta-res)
+                retry-after-ms (:retry-after-ms meta-res)]
+            (if-not allowed?
+              (let [retry-secs (max 1 (long (Math/ceil (/ (long (or retry-after-ms 0)) 1000.0))))]
                 (send-response exchange
                                {:response/status 429
                                 :response/headers {"Retry-After" (str retry-secs)
@@ -243,13 +242,12 @@
                 (if (pos? body-len)
                   (let [sdf (SimpleDateFormat. "yyyy-MM")
                         month-key (.format sdf (Date. now-ms))
-                        allowed? (atom true)]
-                    (swap! limiter-atom
-                           (fn [st]
-                             (let [res (rl/record-egress st body-len month-key)]
-                               (reset! allowed? (:allowed? res))
-                               (:state res))))
-                    (if-not @allowed?
+                        swapped-egress (swap! limiter-atom
+                                              (fn [st]
+                                                (let [res (rl/record-egress st body-len month-key)]
+                                                  (with-meta (:state res) (dissoc res :state)))))
+                        egress-allowed? (:allowed? (meta swapped-egress))]
+                    (if-not egress-allowed?
                       (send-response exchange
                                      {:response/status 429
                                       :response/headers {"Content-Type" "text/plain; charset=utf-8"

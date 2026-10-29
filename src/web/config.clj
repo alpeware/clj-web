@@ -118,12 +118,28 @@
               cluster-nodes (get cluster-cfg :nodes (get-in default-config [:cluster :nodes]))
               _ (when-not (map? cluster-nodes)
                   (throw (ex-info ":cluster :nodes must be a map" {:nodes cluster-nodes})))
-              require-fps? (get cluster-cfg :require-fingerprints? false)
+              require-fps? (get cluster-cfg :require-fingerprints? (not (:allow-unauthenticated? cluster-cfg false)))
               normalized-nodes
               (into {}
                     (map (fn [[n-id n-info]]
                            (when (and (map? n-info) (contains? n-info :port))
                              (validate-port! (keyword "cluster.nodes" (name n-id)) (:port n-info)))
+                           (when (and (map? n-info) (contains? n-info :ip4) (some? (:ip4 n-info)))
+                             (let [ip4-str (str (:ip4 n-info))
+                                   valid? (try
+                                            (instance? java.net.Inet4Address (java.net.InetAddress/ofLiteral ip4-str))
+                                            (catch Exception _ false))]
+                               (when-not valid?
+                                 (throw (ex-info (str "Invalid IPv4 literal for node " (pr-str n-id) ": " (pr-str ip4-str))
+                                                 {:node-id n-id :field :ip4 :value ip4-str})))))
+                           (when (and (map? n-info) (contains? n-info :ip6) (some? (:ip6 n-info)))
+                             (let [ip6-str (str (:ip6 n-info))
+                                   valid? (try
+                                            (instance? java.net.Inet6Address (java.net.InetAddress/ofLiteral ip6-str))
+                                            (catch Exception _ false))]
+                               (when-not valid?
+                                 (throw (ex-info (str "Invalid IPv6 literal for node " (pr-str n-id) ": " (pr-str ip6-str))
+                                                 {:node-id n-id :field :ip6 :value ip6-str})))))
                            (let [raw-fp (:fingerprint n-info)]
                              (when (and require-fps? (not= n-id node-id) (str/blank? (str raw-fp)))
                                (throw (ex-info (str "Missing required fingerprint for remote peer: " (pr-str n-id))

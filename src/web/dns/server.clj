@@ -59,13 +59,11 @@
                                              (str client-addr))
                                  subnet-key (rl/ip->subnet-key client-ip)
                                  now-ms (System/currentTimeMillis)
-                                 allowed? (atom true)]
-                             (swap! limiter-atom
-                                    (fn [st]
-                                      (let [res (rl/check-and-consume st subnet-key 1.0 now-ms)]
-                                        (reset! allowed? (:allowed? res))
-                                        (:state res))))
-                             (when @allowed?
+                                 swapped-st (swap! limiter-atom
+                                                   (fn [st]
+                                                     (let [res (rl/check-and-consume st subnet-key 1.0 now-ms)]
+                                                       (with-meta (:state res) (dissoc res :state)))))]
+                             (when (:allowed? (meta swapped-st))
                                (try
                                  (let [query-pkt (codec/decode-packet req-bytes)
                                        cluster-st (if (instance? clojure.lang.IDeref cluster-state-atom)
@@ -92,7 +90,10 @@
                      (catch ClosedByInterruptException _ (.set running? false))
                      (catch AsynchronousCloseException _ (.set running? false))
                      (catch SocketException _ (.set running? false))
-                     (catch Exception _ nil)))))))
+                     (catch Exception e
+                       (when (.get running?)
+                         (binding [*out* *err*]
+                           (println (str "Unexpected error in DNS UDP loop: " (.getMessage e))))))))))))
 
         ;; TCP accept loop
         tcp-thread
@@ -122,11 +123,17 @@
                                         (.writeShort out (alength resp-bytes))
                                         (.write out resp-bytes 0 (alength resp-bytes))
                                         (.flush out))))
-                                  (catch Exception _ nil)
+                                  (catch Exception e
+                                    (when (.get running?)
+                                      (binding [*out* *err*]
+                                        (println (str "Unexpected error in DNS TCP connection: " (.getMessage e))))))
                                   (finally
                                     (try (.close client) (catch Exception _ nil)))))))
                    (catch SocketException _ (.set running? false))
-                   (catch Exception _ nil))))))
+                   (catch Exception e
+                     (when (.get running?)
+                       (binding [*out* *err*]
+                         (println (str "Unexpected error in DNS TCP accept: " (.getMessage e)))))))))))
 
         stop-fn (fn []
                   (.set running? false)

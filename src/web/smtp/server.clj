@@ -208,35 +208,39 @@
                 (recur current-socket in out new-state)))))))))
 
 (defn- handle-client-connection!
-  [^Socket client-socket config tls-manager opts semaphore limiter-atom sock-timeout]
-  (try
-    (.setSoTimeout client-socket sock-timeout)
-    (if-not (.tryAcquire ^Semaphore semaphore)
-      ;; Max concurrent sessions exceeded
-      (with-open [w (BufferedWriter. (OutputStreamWriter. (.getOutputStream client-socket) StandardCharsets/UTF_8))]
-        (.write w "421 4.3.2 Server too busy, try again later\r\n")
-        (.flush w))
-      (try
-        (let [remote-addr (.getInetAddress client-socket)
-              remote-ip (if remote-addr (.getHostAddress remote-addr) "127.0.0.1")
-              subnet-key (rl/ip->subnet-key remote-ip)
-              now-ms (System/currentTimeMillis)
-              allowed? (atom true)]
-          (swap! limiter-atom
-                 (fn [st]
-                   (let [res (rl/check-and-consume st subnet-key 1.0 now-ms)]
-                     (reset! allowed? (:allowed? res))
-                     (:state res))))
-          (if-not @allowed?
-            (with-open [w (BufferedWriter. (OutputStreamWriter. (.getOutputStream client-socket) StandardCharsets/UTF_8))]
-              (.write w "421 4.7.0 Too many connections from your IP\r\n")
-              (.flush w))
-            (run-session-loop! client-socket config tls-manager opts sock-timeout)))
-        (finally
-          (.release ^Semaphore semaphore))))
-    (catch Exception _ nil)
-    (finally
-      (try (.close client-socket) (catch Exception _ nil)))))
+  ([^Socket client-socket config tls-manager opts semaphore limiter-atom sock-timeout]
+   (handle-client-connection! client-socket config tls-manager opts semaphore limiter-atom sock-timeout nil))
+  ([^Socket client-socket config tls-manager opts semaphore limiter-atom sock-timeout running?]
+   (try
+     (.setSoTimeout client-socket sock-timeout)
+     (if-not (.tryAcquire ^Semaphore semaphore)
+       ;; Max concurrent sessions exceeded
+       (with-open [w (BufferedWriter. (OutputStreamWriter. (.getOutputStream client-socket) StandardCharsets/UTF_8))]
+         (.write w "421 4.3.2 Server too busy, try again later\r\n")
+         (.flush w))
+       (try
+         (let [remote-addr (.getInetAddress client-socket)
+               remote-ip (if remote-addr (.getHostAddress remote-addr) "127.0.0.1")
+               subnet-key (rl/ip->subnet-key remote-ip)
+               now-ms (System/currentTimeMillis)
+               swapped-st (swap! limiter-atom
+                                 (fn [st]
+                                   (let [res (rl/check-and-consume st subnet-key 1.0 now-ms)]
+                                     (with-meta (:state res) (dissoc res :state)))))
+               allowed? (:allowed? (meta swapped-st))]
+           (if-not allowed?
+             (with-open [w (BufferedWriter. (OutputStreamWriter. (.getOutputStream client-socket) StandardCharsets/UTF_8))]
+               (.write w "421 4.7.0 Too many connections from your IP\r\n")
+               (.flush w))
+             (run-session-loop! client-socket config tls-manager opts sock-timeout)))
+         (finally
+           (.release ^Semaphore semaphore))))
+     (catch Exception e
+       (when (or (nil? running?) (.get ^AtomicBoolean running?))
+         (binding [*out* *err*]
+           (println (str "Unexpected error in SMTP client connection: " (.getMessage e))))))
+     (finally
+       (try (.close client-socket) (catch Exception _ nil))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Server Lifecycle
@@ -275,11 +279,11 @@
                       (.submit vthread-executor
                                ^Runnable
                                (fn []
-                                 (handle-client-connection! client config tls-manager opts semaphore limiter-atom sock-timeout))))
-                    (catch Exception _
-                      (when-not (.get running?)
-                        ;; Socket was closed on shutdown, exit loop
-                        nil))))))
+                                 (handle-client-connection! client config tls-manager opts semaphore limiter-atom sock-timeout running?))))
+                    (catch Exception e
+                      (when (.get running?)
+                        (binding [*out* *err*]
+                          (println (str "Unexpected error in SMTP accept loop: " (.getMessage e))))))))))
      {:server-socket server-socket
       :port bound-port
       :running? running?
