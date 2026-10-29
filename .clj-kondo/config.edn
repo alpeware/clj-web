@@ -1,0 +1,6 @@
+{:lint-as {clojure.test.check.clojure-test/defspec clojure.test/deftest
+           einsum.runtime.arena/with-device-arena clojure.core/with-open
+           einsum.core/with-device-arena clojure.core/with-open
+           einsum.compiler.kernel/defkernel clojure.core/def
+           einsum.core/defkernel clojure.core/def}
+ :linters {:missing-docstring {:level :off}}}

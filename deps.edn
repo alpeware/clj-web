@@ -1,0 +1,30 @@
+{:paths ["src" "resources"]
+ :deps {org.clojure/clojure {:mvn/version "1.12.4"}
+        org.clojure/data.json {:mvn/version "2.5.1"}
+        alpeware/datachannel-clj {:git/url "https://github.com/alpeware/datachannel-clj"
+                                  :git/sha "c60faa6ce783d85bd00c9023868e5df8a8a07424"}}
+ :jvm-opts ["--enable-native-access=ALL-UNNAMED"
+            "--add-exports=java.base/sun.security.tools.keytool=ALL-UNNAMED"
+            "--add-exports=java.base/sun.security.x509=ALL-UNNAMED"
+            "-XX:+UseCompactObjectHeaders"
+            "-XX:+UseZGC"
+            "-Xms256m"
+            "-Xmx512m"]
+ :aliases
+ {:run
+  {:main-opts ["-m" "web.main"]}
+  :test
+  {:extra-paths ["test"]
+   :extra-deps {org.clojure/test.check {:mvn/version "1.1.1"}}
+   :main-opts ["-m" "web.test-runner"]}
+  :repl
+  {:extra-paths ["test"]
+   :jvm-opts ["-Dclojure.server.repl={:port 5555 :accept clojure.core.server/repl}"]}
+  :lint
+  {:replace-deps {clj-kondo/clj-kondo {:mvn/version "2026.01.19"}
+                  org.clojure/data.json {:mvn/version "2.5.1"}
+                  org.clojure/test.check {:mvn/version "1.1.1"}}
+   :main-opts ["-m" "clj-kondo.main" "--lint" "src" "test"]}
+  :format
+  {:replace-deps {dev.weavejester/cljfmt {:mvn/version "0.16.1"}}
+   :main-opts ["-m" "cljfmt.main" "fix" "src" "test"]}}}
