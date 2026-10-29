@@ -230,7 +230,7 @@
                      (mesh/clear-acme-challenge! cluster-mgr token)))))))))
 
      ;; Step 6: Finalize Order with CSR
-     (let [domain-kp (jws/generate-ec-keypair)
+     (let [domain-kp (or (:domain-keypair opts) (jws/generate-ec-keypair))
            csr-der (jws/generate-csr domain-kp domains)
            csr-b64 (jws/base64url-encode csr-der)
            _ (acme-post! client-state finalize-url {"csr" csr-b64})
