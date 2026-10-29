@@ -106,6 +106,47 @@ Once at least 2 of the 3 nodes are online, they automatically form a DTLS/SCTP m
 
 ---
 
+## Cluster Automation (`scripts/cluster.sh`)
+
+`scripts/cluster.sh` is an idempotent management script for provisioning, deploying, and inspecting the 3-node cluster on GCP `e2-micro` instances.
+
+### 1. Provision Cluster (`init`)
+
+Provisions GCP projects, links billing, reserves static external IPv4 addresses, configures firewall rules, boots `e2-micro` Debian 12 instances, and bootstraps OpenJDK 25 and `clj-web.service`:
+
+```bash
+./scripts/cluster.sh init
+```
+
+Upon completion, `init` prints the Namecheap Personal Nameserver glue records (`ns1`, `ns2`, `ns3`) and writes `.cluster.env` and `cluster.edn`.
+
+### 2. Deploy & Restart (`deploy`)
+
+Builds the local standalone uberjar (`target/clj-web.jar`), uploads it via `rsync`, queries each node's DTLS SHA-256 fingerprint, renders per-node `/etc/clj-web/config.edn` configs with pinned fingerprints, syncs `public/` web assets, and restarts `clj-web.service`:
+
+```bash
+# Production Let's Encrypt certificate
+./scripts/cluster.sh deploy
+
+# Or test with Let's Encrypt Staging environment
+./scripts/cluster.sh deploy --staging
+```
+
+### 3. Inspect Cluster Health (`status`)
+
+Displays the live status of all 3 cluster nodes, including GCP VM state, static IPs, `systemctl is-active`, RAM consumption, DNS A-record resolution, and inbound email count:
+
+```bash
+./scripts/cluster.sh status
+```
+
+Additional operational subcommands:
+- `./scripts/cluster.sh logs [ns1|ns2|ns3]` — View or follow systemd journal logs.
+- `./scripts/cluster.sh mail [ns1|ns2|ns3]` — List received and replicated `.eml` emails.
+- `./scripts/cluster.sh ssh <ns1|ns2|ns3>` — Open an interactive SSH session to a node.
+
+---
+
 ## License
 
 Copyright © 2026 Alpeware.

@@ -3,3 +3,6 @@
 /target/
 /.nrepl-port
 *.jar
+/.ssh/
+/cluster.edn
+/.cluster.env

@@ -2,6 +2,7 @@
   "Main entrypoint, system lifecycle wiring, and CLI commands for clj-web.
    Orchestrates DNS (UDP/TCP 53), HTTP (80) & HTTPS (443), inbound SMTP (25),
    ACME v2 certificate provisioning, and 3-node DataChannel full-mesh clustering."
+  (:gen-class)
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [web.acme.client :as acme]
