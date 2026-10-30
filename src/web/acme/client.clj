@@ -295,7 +295,7 @@
   ([config cluster-mgr tls-manager opts]
    (let [running? (AtomicBoolean. true)
          executor (Executors/newSingleThreadScheduledExecutor)
-         interval-ms (long (or (:check-interval-ms opts) 3600000))
+         interval-ms (long (or (:check-interval-ms opts) (get-in config [:acme :check-interval-ms] 15000)))
          base-backoff-ms (long (or (:backoff-base-ms opts) 60000))
          on-error (:on-error opts)
          retry-state (atom {:consecutive-failures 0
@@ -310,8 +310,10 @@
                                       true)]
                         (when (and leader? (needs-renewal? config tls-manager now))
                           (try
-                            (provision-certificate! config cluster-mgr tls-manager opts)
-                            (swap! retry-state assoc :consecutive-failures 0 :next-attempt-ms 0)
+                            (println (str "Starting ACME certificate provisioning for " (:domain config) " via " (get-in config [:acme :directory-url])))
+                            (let [res (provision-certificate! config cluster-mgr tls-manager opts)]
+                              (println (str "Successfully provisioned ACME certificate for " (:domain config) " (expires: " (:expires-at res) ")"))
+                              (swap! retry-state assoc :consecutive-failures 0 :next-attempt-ms 0))
                             (catch Exception e
                               (let [failures (inc (long consecutive-failures))
                                     backoff-delay (min 86400000 (* base-backoff-ms (bit-shift-left 1 (min failures 10))))
