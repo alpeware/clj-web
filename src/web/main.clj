@@ -76,9 +76,10 @@
   (println "Usage: clj-web <command> [args...]")
   (println "")
   (println "Commands:")
-  (println "  run <config.edn>               Start clj-web node in foreground")
-  (println "  print-fingerprint <config.edn> Display DTLS SHA-256 certificate fingerprint")
-  (println "  list-mail <config.edn>         List saved RFC 822 .eml emails in state-dir/mail")
+  (println "  run <config.edn>                         Start clj-web node in foreground")
+  (println "  print-fingerprint <config.edn>           Display DTLS SHA-256 certificate fingerprint")
+  (println "  list-mail <config.edn>                   List saved RFC 822 .eml emails in state-dir/mail")
+  (println "  read-mail <config.edn> [id-or-filename]  Read and display saved email headers and plain text body")
   (println ""))
 
 (defn- cmd-print-fingerprint [config-path]
@@ -129,6 +130,60 @@
                          (or (:subject info) "(no subject)")
                          (or (:file info) "")))))))
 
+(defn- extract-plain-body
+  "Extracts plain text body from a raw RFC 822 / MIME .eml string.
+   Extracts text/plain MIME part if present, otherwise body after initial headers."
+  [^String raw-eml]
+  (when raw-eml
+    (let [[_ body] (str/split raw-eml #"\r?\n\r?\n" 2)
+          raw-body (or body raw-eml)]
+      (if-let [[_ part] (re-find #"(?is)Content-Type:\s*text/plain[^\r\n]*(?:\r?\n[^\r\n]+)*\r?\n\r?\n(.*?)(?:\r?\n--|\z)" raw-eml)]
+        (str/trim part)
+        (str/trim raw-body)))))
+
+(defn- cmd-read-mail [config-path target-id]
+  (let [cfg (config/load-config config-path)
+        emails (smtp/list-emails (:state-dir cfg))]
+    (if (empty? emails)
+      (println (str "No emails found in " (:state-dir cfg) "/mail/."))
+      (let [target (when-not (str/blank? target-id) (str/trim target-id))
+            selected (if (or (nil? target) (= target "latest"))
+                       (last emails)
+                       (some (fn [m]
+                               (let [^File f (:file m)
+                                     fname (when f (.getName f))
+                                     base-id (when fname (str/replace fname #"\.eml$" ""))]
+                                 (when (or (= (:id m) target)
+                                           (= base-id target)
+                                           (= fname target)
+                                           (= fname (str target ".eml")))
+                                   m)))
+                             emails))]
+        (if-not selected
+          (println (str "Email not found: " target-id))
+          (let [^File f (:file selected)
+                raw-eml (slurp f)
+                summary (parse-eml-summary f)
+                id (or (:id summary) (:id selected) (when f (str/replace (.getName f) #"\.eml$" "")) "unknown")
+                from (or (:from summary) "unknown")
+                to (let [r (:recipients summary)]
+                     (cond
+                       (coll? r) (str/join ", " r)
+                       (some? r) (str r)
+                       :else "unknown"))
+                subject (or (:subject summary) "(no subject)")
+                filename (if f (.getName f) (or (:file summary) ""))
+                body (extract-plain-body raw-eml)]
+            (println "============================================================")
+            (println (str "ID:      " id))
+            (println (str "From:    " from))
+            (println (str "To:      " to))
+            (println (str "Subject: " subject))
+            (println (str "File:    " filename))
+            (println "------------------------------------------------------------")
+            (println body)
+            (println "============================================================")))))))
+
 (defn- cmd-run [config-path]
   (let [cfg (config/load-config config-path)
         node (start-node! cfg)
@@ -176,6 +231,11 @@
       (= cmd "list-mail")
       (if arg
         (cmd-list-mail arg)
+        (do (println "Error: Missing <config.edn> argument.") (print-usage) (System/exit 1)))
+
+      (= cmd "read-mail")
+      (if arg
+        (cmd-read-mail arg (nth args 2 nil))
         (do (println "Error: Missing <config.edn> argument.") (print-usage) (System/exit 1)))
 
       (= cmd "run")

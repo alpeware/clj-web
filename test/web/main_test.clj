@@ -10,6 +10,7 @@
         and health-filtered DNS resolution."
   (:require [clojure.data.json :as json]
             [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [web.acme.client :as acme]
             [web.acme.jws :as jws]
@@ -275,6 +276,29 @@
             (is (.contains out "Found 1 emails"))
             (is (.contains out "alice@sender.org"))
             (is (.contains out "CLI Subcommand Test Email")))))
+
+      (testing "read-mail subcommand displays email headers and plain body"
+        (let [saved (smtp/save-eml! (.getAbsolutePath dir)
+                                    {:from "bob@sender.org"
+                                     :to ["admin@example.com"]
+                                     :helo "mail.sender.org"
+                                     :remote-ip "192.168.1.1"
+                                     :domain "example.com"
+                                     :subject "Read Mail Test Subject"
+                                     :raw-eml "From: bob@sender.org\r\nTo: admin@example.com\r\nSubject: Read Mail Test Subject\r\n\r\nHello from the plain body!"})
+              email-file (:file saved)
+              email-id (str/replace (.getName ^File email-file) #"\.eml$" "")
+              out-latest (with-out-str (main/-main "read-mail" (.getAbsolutePath cfg-file)))
+              out-id (with-out-str (main/-main "read-mail" (.getAbsolutePath cfg-file) email-id))]
+          (is (.contains out-latest "ID:"))
+          (is (.contains out-latest "From:    bob@sender.org"))
+          (is (.contains out-latest "To:      admin@example.com"))
+          (is (.contains out-latest "Subject: Read Mail Test Subject"))
+          (is (.contains out-latest "Hello from the plain body!"))
+          (is (.contains out-id "ID:"))
+          (is (.contains out-id email-id))
+          (is (.contains out-id "From:    bob@sender.org"))
+          (is (.contains out-id "Hello from the plain body!"))))
 
       (testing "single-node start-node! and stop-node! lifecycle"
         (let [node (main/start-node! {:domain "example.com"

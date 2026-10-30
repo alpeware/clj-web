@@ -97,7 +97,7 @@ ssh_cmd() {
     echo "Error: IP address for node ${node} could not be resolved. Run 'cluster.sh init' first." >&2
     return 1
   fi
-  ssh -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=10 -i "${SSH_KEY}" "${SSH_USER}@${ip}" "$@"
+  ssh -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=10 -o LogLevel=ERROR -i "${SSH_KEY}" "${SSH_USER}@${ip}" "$@"
 }
 
 ensure_firewall_rule() {
@@ -239,7 +239,7 @@ cmd_init() {
     echo "--> Waiting for SSH readiness on ${node} (${ip})..."
     local retries=30
     while (( retries > 0 )); do
-      if ssh -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=5 -i "${SSH_KEY}" "${SSH_USER}@${ip}" "echo ssh-ok" &>/dev/null; then
+      if ssh -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=5 -o LogLevel=ERROR -i "${SSH_KEY}" "${SSH_USER}@${ip}" "echo ssh-ok" &>/dev/null; then
         break
       fi
       sleep 5
@@ -251,7 +251,7 @@ cmd_init() {
     fi
 
     echo "--> Running remote bootstrap script on ${node} (${ip})..."
-    ssh -o StrictHostKeyChecking=accept-new -o BatchMode=yes -i "${SSH_KEY}" "${SSH_USER}@${ip}" bash -s << 'REMOTE_BOOTSTRAP'
+    ssh -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o LogLevel=ERROR -i "${SSH_KEY}" "${SSH_USER}@${ip}" bash -s << 'REMOTE_BOOTSTRAP'
 set -euo pipefail
 
 # 1. Swapfile (1GB)
@@ -411,7 +411,7 @@ cmd_deploy() {
     local ip
     ip="$(get_ip "$node")"
     echo "Uploading to ${node} (${ip})..."
-    rsync -az -e "ssh -o StrictHostKeyChecking=accept-new -i ${SSH_KEY}" \
+    rsync -az -e "ssh -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR -i ${SSH_KEY}" \
       "${ROOT_DIR}/target/clj-web.jar" "${SSH_USER}@${ip}:/opt/clj-web/clj-web.jar"
   done
 
@@ -498,7 +498,7 @@ REMOTE_FP
                    :ns3 {:ip4 "${ip3}" :ip "${ip3}" :port 5000 :fingerprint "${FINGERPRINTS[ns3]}"}}}}
 CFG_EOF
 
-    rsync -az -e "ssh -o StrictHostKeyChecking=accept-new -i ${SSH_KEY}" \
+    rsync -az -e "ssh -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR -i ${SSH_KEY}" \
       "$tmp_cfg" "${SSH_USER}@${ip}:/etc/clj-web/config.edn.new"
     rm -f "$tmp_cfg"
     ssh_cmd "$node" bash -s << REMOTE_CFG
@@ -638,6 +638,40 @@ cmd_mail() {
   done
 }
 
+cmd_read_mail() {
+  local id="${1:-latest}"
+  local node="${2:-ns1}"
+  local raw=false
+  if [[ "${3:-}" == "--raw" ]] || [[ "${2:-}" == "--raw" ]]; then
+    raw=true
+    if [[ "${2:-}" == "--raw" ]]; then
+      node="ns1"
+    fi
+  fi
+
+  echo "=== Reading Email (${id}) on ${node} ==="
+  if [[ "$raw" == true ]]; then
+    ssh_cmd "$node" bash -s -- "$id" << 'REMOTE_RAW_MAIL'
+set -euo pipefail
+target="$1"
+mail_dir="/var/lib/clj-web/mail"
+if [[ "$target" == "latest" ]]; then
+  file="$(ls -1t "${mail_dir}"/*.eml 2>/dev/null | head -n 1 || true)"
+else
+  file="${mail_dir}/${target%.eml}.eml"
+fi
+if [[ -z "$file" || ! -f "$file" ]]; then
+  echo "Email not found: ${target}" >&2
+  exit 1
+fi
+cat "$file"
+REMOTE_RAW_MAIL
+  else
+    ssh_cmd "$node" \
+      "/opt/jdk-25/bin/java -Xms128m -Xmx256m --enable-native-access=ALL-UNNAMED --add-exports=java.base/sun.security.tools.keytool=ALL-UNNAMED --add-exports=java.base/sun.security.x509=ALL-UNNAMED -jar /opt/clj-web/clj-web.jar read-mail /etc/clj-web/config.edn '${id}'"
+  fi
+}
+
 cmd_ssh() {
   local target="${1:-}"
   if [[ -z "$target" ]]; then
@@ -651,7 +685,7 @@ cmd_ssh() {
     return 1
   fi
   echo "Connecting to ${target} (${ip})..."
-  exec ssh -o StrictHostKeyChecking=accept-new -i "${SSH_KEY}" "${SSH_USER}@${ip}"
+  exec ssh -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR -i "${SSH_KEY}" "${SSH_USER}@${ip}"
 }
 
 usage() {
@@ -664,6 +698,7 @@ Commands:
   status                Display cluster node states, IPs, memory usage, systemd status, DNS records, and email counts
   logs [ns1|ns2|ns3]    View systemd journal logs (streams if specific node is specified)
   mail [ns1|ns2|ns3]    List saved RFC 822 .eml emails replicated across the cluster
+  read-mail [id|latest] [ns1|ns2|ns3] [--raw]  Read an inbound email (defaults to latest on ns1)
   ssh <ns1|ns2|ns3>     Open an interactive SSH session to a cluster node
   help, --help, -h      Display this usage manual
 
@@ -694,6 +729,10 @@ case "${1:-help}" in
   mail)
     shift
     cmd_mail "${1:-}"
+    ;;
+  read-mail|read)
+    shift
+    cmd_read_mail "$@"
     ;;
   ssh)
     shift
