@@ -86,6 +86,37 @@
                    :modified (.lastModified f)}))
            vec))))
 
+(defn delete-emails!
+  "Deletes matching .eml files in <state-dir>/mail/ based on target.
+   target can be:
+   - \"all\": deletes all emails
+   - nil, blank, or \"latest\": deletes the latest email
+   - specific ID or filename: deletes matching email
+   Returns {:deleted [<filename> ...] :count <num-deleted>}."
+  [state-dir target]
+  (let [emails (list-emails state-dir)]
+    (if (empty? emails)
+      {:deleted [] :count 0}
+      (let [target-str (when target (str/trim (str target)))
+            selected (cond
+                       (= target-str "all")
+                       emails
+
+                       (or (nil? target) (str/blank? target-str) (= target-str "latest"))
+                       [(last emails)]
+
+                       :else
+                       (filter (fn [m]
+                                 (or (= (:name m) target-str)
+                                     (= (:name m) (str target-str ".eml"))
+                                     (= (str/replace (:name m) #"\.eml$" "") target-str)))
+                               emails))]
+        (doseq [m selected]
+          (when-let [^File f (:file m)]
+            (try (.delete f) (catch Exception _ nil))))
+        {:deleted (mapv :name selected)
+         :count (count selected)}))))
+
 ;; ---------------------------------------------------------------------------
 ;; Connection Handling
 ;; ---------------------------------------------------------------------------

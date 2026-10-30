@@ -206,7 +206,8 @@
 
           ;; 3. Status check
           (and (or (= method :GET) (= method :HEAD))
-               (= path "/statusz"))
+               (= path "/statusz")
+               (#{"127.0.0.1" "::1" "0:0:0:0:0:0:0:1"} (:request/remote-ip req)))
           (let [body (render-statusz limiter-atom cluster-state-atom (System/currentTimeMillis))]
             (send-response exchange
                            {:response/status 200
@@ -227,7 +228,7 @@
                             :response/body nil})))))))
 
 (defn- make-https-port-443-handler
-  [config cache-atom limiter-atom cluster-state-atom]
+  [config cache-atom limiter-atom]
   (reify HttpHandler
     (handle [_ exchange]
       (let [req (exchange->request exchange)
@@ -244,15 +245,6 @@
                          {:response/status 200
                           :response/headers {"Content-Type" "text/plain; charset=utf-8"}
                           :response/body (if (= method :HEAD) nil "ok\n")})
-
-          ;; Status check (bypasses rate limit)
-          (and (or (= method :GET) (= method :HEAD))
-               (= path "/statusz"))
-          (let [body (render-statusz limiter-atom cluster-state-atom now-ms)]
-            (send-response exchange
-                           {:response/status 200
-                            :response/headers {"Content-Type" "text/plain; charset=utf-8"}
-                            :response/body (if (= method :HEAD) nil body)}))
 
           :else
           ;; Rate limit check
@@ -328,7 +320,7 @@
          https-server (HttpsServer/create (InetSocketAddress. ^String bind-ip https-port) 0)
          _ (.setHttpsConfigurator https-server (tls/make-https-configurator (:ssl-context-atom tls-manager)))
          _ (.setExecutor https-server vthread-executor)
-         _ (.createContext https-server "/" (make-https-port-443-handler config cache-atom limiter-atom cluster-state-atom))
+         _ (.createContext https-server "/" (make-https-port-443-handler config cache-atom limiter-atom))
          _ (.start https-server)
          bound-https-port (.getPort (.getAddress https-server))
 

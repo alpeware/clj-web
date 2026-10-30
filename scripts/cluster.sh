@@ -774,6 +774,50 @@ REMOTE_RAW_MAIL
   fi
 }
 
+cmd_delete_mail() {
+  local target="${1:-}"
+  if [[ -z "$target" ]]; then
+    echo "Usage: $0 delete-mail <id|latest|all>" >&2
+    return 1
+  fi
+
+  local resolved_target="$target"
+  if [[ "$target" == "latest" ]]; then
+    resolved_target="$(ssh_cmd "ns1" "ls -1 /var/lib/clj-web/mail/*.eml 2>/dev/null | sort | tail -n 1 | xargs -r basename" || true)"
+    if [[ -z "$resolved_target" ]]; then
+      echo "No emails found on ns1 to delete."
+      return 0
+    fi
+    echo "Resolved 'latest' to ${resolved_target}"
+  fi
+
+  for node in "${NODES[@]}"; do
+    echo "=== Deleting Email (${resolved_target}) on ${node} ==="
+    ssh_cmd "$node" bash -s -- "$resolved_target" << 'REMOTE_DELETE_MAIL'
+set -euo pipefail
+target="$1"
+mail_dir="/var/lib/clj-web/mail"
+if [[ ! -d "$mail_dir" ]]; then
+  echo "No mail directory on $(hostname)."
+  exit 0
+fi
+if [[ "$target" == "all" ]]; then
+  count=$(find "$mail_dir" -maxdepth 1 -type f -name '*.eml' | wc -l)
+  rm -f "${mail_dir}"/*.eml
+  echo "Deleted all (${count}) email(s) on $(hostname)."
+else
+  file="${mail_dir}/${target%.eml}.eml"
+  if [[ -f "$file" ]]; then
+    rm -f "$file"
+    echo "Deleted $(basename "$file") on $(hostname)."
+  else
+    echo "Email ${target} not found on $(hostname)."
+  fi
+fi
+REMOTE_DELETE_MAIL
+  done
+}
+
 cmd_ssh() {
   local target="${1:-}"
   if [[ -z "$target" ]]; then
@@ -801,6 +845,7 @@ Commands:
   logs [ns1|ns2|ns3]    View systemd journal logs (streams if specific node is specified)
   mail [ns1|ns2|ns3]    List saved RFC 822 .eml emails replicated across the cluster
   read-mail [id|latest] [ns1|ns2|ns3] [--raw]  Read an inbound email (defaults to latest on ns1)
+  delete-mail <id|latest|all>                 Delete an email (or 'latest' / 'all') across all cluster nodes
   ssh <ns1|ns2|ns3>     Open an interactive SSH session to a cluster node
   help, --help, -h      Display this usage manual
 
@@ -835,6 +880,10 @@ case "${1:-help}" in
   read-mail|read)
     shift
     cmd_read_mail "$@"
+    ;;
+  delete-mail|delete)
+    shift
+    cmd_delete_mail "$@"
     ;;
   ssh)
     shift

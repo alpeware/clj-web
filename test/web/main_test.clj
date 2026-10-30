@@ -300,6 +300,50 @@
           (is (.contains out-id "From:    bob@sender.org"))
           (is (.contains out-id "Hello from the plain body!"))))
 
+      (testing "delete-mail subcommand deletes specific, latest, and all emails"
+        (let [s1 (smtp/save-eml! (.getAbsolutePath dir)
+                                 {:from "del1@sender.org"
+                                  :to ["admin@example.com"]
+                                  :helo "mail.sender.org"
+                                  :remote-ip "192.168.1.1"
+                                  :domain "example.com"
+                                  :subject "Delete 1"
+                                  :raw-eml "From: del1@sender.org\r\nSubject: Delete 1\r\n\r\n1"})
+              s2 (smtp/save-eml! (.getAbsolutePath dir)
+                                 {:from "del2@sender.org"
+                                  :to ["admin@example.com"]
+                                  :helo "mail.sender.org"
+                                  :remote-ip "192.168.1.1"
+                                  :domain "example.com"
+                                  :subject "Delete 2"
+                                  :raw-eml "From: del2@sender.org\r\nSubject: Delete 2\r\n\r\n2"})
+              _s3 (smtp/save-eml! (.getAbsolutePath dir)
+                                  {:from "del3@sender.org"
+                                   :to ["admin@example.com"]
+                                   :helo "mail.sender.org"
+                                   :remote-ip "192.168.1.1"
+                                   :domain "example.com"
+                                   :subject "Delete 3"
+                                   :raw-eml "From: del3@sender.org\r\nSubject: Delete 3\r\n\r\n3"})
+              id1 (str/replace (.getName ^File (:file s1)) #"\.eml$" "")
+              fname2 (.getName ^File (:file s2))
+              ;; Delete specific ID
+              out-id (with-out-str (main/-main "delete-mail" (.getAbsolutePath cfg-file) id1))
+              _ (is (.contains out-id "Deleted 1 email(s)"))
+              _ (is (.contains out-id id1))
+              ;; Delete latest (which is s3)
+              out-latest (with-out-str (main/-main "delete-mail" (.getAbsolutePath cfg-file) "latest"))
+              _ (is (.contains out-latest "Deleted 1 email(s)"))
+              ;; Only s2 remains; delete all
+              out-all (with-out-str (main/-main "delete-mail" (.getAbsolutePath cfg-file) "all"))
+              _ (is (re-find #"Deleted \d+ email\(s\)" out-all))
+              _ (is (.contains out-all fname2))
+              ;; Now empty; deleting again prints no matching emails found
+              out-empty (with-out-str (main/-main "delete-mail" (.getAbsolutePath cfg-file) "latest"))
+              _ (is (.contains out-empty "No matching emails found to delete"))
+              remaining (smtp/list-emails (.getAbsolutePath dir))]
+          (is (empty? remaining))))
+
       (testing "single-node start-node! and stop-node! lifecycle"
         (let [node (main/start-node! {:domain "example.com"
                                       :node/id :ns1

@@ -80,6 +80,7 @@
   (println "  print-fingerprint <config.edn>           Display DTLS SHA-256 certificate fingerprint")
   (println "  list-mail <config.edn>                   List saved RFC 822 .eml emails in state-dir/mail")
   (println "  read-mail <config.edn> [id-or-filename]  Read and display saved email headers and plain text body")
+  (println "  delete-mail <config.edn> [id|latest|all] Delete saved emails (specific ID, latest, or all)")
   (println ""))
 
 (defn- cmd-print-fingerprint [config-path]
@@ -184,6 +185,14 @@
             (println body)
             (println "============================================================")))))))
 
+(defn- cmd-delete-mail [config-path target]
+  (let [cfg (config/load-config config-path)
+        t (or target "latest")
+        res (smtp/delete-emails! (:state-dir cfg) t)]
+    (if (pos? (:count res))
+      (println (str "Deleted " (:count res) " email(s) from " (:state-dir cfg) "/mail/: " (str/join ", " (:deleted res))))
+      (println (str "No matching emails found to delete (" t ") in " (:state-dir cfg) "/mail/.")))))
+
 (defn- cmd-run [config-path]
   (let [cfg (config/load-config config-path)
         node (start-node! cfg)
@@ -236,6 +245,11 @@
       (= cmd "read-mail")
       (if arg
         (cmd-read-mail arg (nth args 2 nil))
+        (do (println "Error: Missing <config.edn> argument.") (print-usage) (System/exit 1)))
+
+      (= cmd "delete-mail")
+      (if arg
+        (cmd-delete-mail arg (nth args 2 nil))
         (do (println "Error: Missing <config.edn> argument.") (print-usage) (System/exit 1)))
 
       (= cmd "run")

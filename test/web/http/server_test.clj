@@ -93,6 +93,13 @@
               (is (= 200 (.statusCode resp)))
               (is (= "ok\n" (.body resp)))))
 
+          (testing "Status check /statusz returns 200 OK on HTTP port for loopback"
+            (let [uri (URI/create (str "http://127.0.0.1:" http-port "/statusz"))
+                  req (-> (HttpRequest/newBuilder uri) (.GET) (.build))
+                  resp (.send client req (HttpResponse$BodyHandlers/ofString))]
+              (is (= 200 (.statusCode resp)))
+              (is (.contains (.body resp) "role="))))
+
           (testing "General request returns 308 Permanent Redirect to HTTPS"
             (let [uri (URI/create (str "http://127.0.0.1:" http-port "/docs/api.html?sort=asc"))
                   req (-> (HttpRequest/newBuilder uri) (.GET) (.build))
@@ -139,6 +146,12 @@
                   resp (.send client req (HttpResponse$BodyHandlers/ofString))]
               (is (= 200 (.statusCode resp)))
               (is (= "ok\n" (.body resp)))))
+
+          (testing "/statusz on HTTPS returns 404 Not Found"
+            (let [uri (URI/create (str "https://127.0.0.1:" https-port "/statusz"))
+                  req (-> (HttpRequest/newBuilder uri) (.GET) (.build))
+                  resp (.send client req (HttpResponse$BodyHandlers/ofString))]
+              (is (= 404 (.statusCode resp)))))
 
           (testing "Conditional request with matching ETag returns 304"
             (let [uri (URI/create (str "https://127.0.0.1:" https-port "/asset.txt"))
