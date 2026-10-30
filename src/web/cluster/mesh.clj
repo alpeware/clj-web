@@ -236,68 +236,77 @@
              res))]
 
      ;; Initialize peer connection descriptors
-     (doseq [pid peer-ids]
-       (let [peer-cfg (get nodes-cfg pid)
-             peer-ip (or (:ip4 peer-cfg) (:ip peer-cfg) "127.0.0.1")
-             peer-port (int (or (:port peer-cfg) 5000))
-             active? (neg? (compare (name node-id) (name pid)))
-             setup (if active? "active" "passive")]
-         (if (= transport :in-memory)
-           ;; In-memory descriptor
-           (swap! peer-conns-atom assoc pid {:peer-id pid :transport :in-memory})
-           ;; datachannel-clj descriptor
-           (try
-             (let [raw-peer-fp (:fingerprint peer-cfg)
-                   peer-fp (when (and (string? raw-peer-fp) (not (str/blank? raw-peer-fp)))
-                             (config/normalize-fingerprint raw-peer-fp))
-                   _ (when (and (not (:allow-unauthenticated? opts)) (str/blank? (str peer-fp)))
-                       (throw (ex-info (str "Missing required DTLS fingerprint for cluster peer: " (pr-str pid))
-                                       {:peer-id pid :peer-cfg peer-cfg})))
-                   local-port (int (or (get-in nodes-cfg [node-id :port]) 5000))
-                   raw-node (api/create-node {:port local-port :setup setup})
-                   local-fp (when-let [raw-fp (:fingerprint identity)]
-                              (config/normalize-fingerprint raw-fp))
-                   local-ice (deterministic-ice-creds node-id local-fp)
-                   node (assoc raw-node
-                               :cert-data (:cert-data identity)
-                               :ice-creds local-ice
-                               :local-sdp-params (assoc (:local-sdp-params raw-node)
-                                                        :ice-ufrag (:ufrag local-ice)
-                                                        :ice-pwd (:pwd local-ice)
-                                                        :fingerprint local-fp
-                                                        :setup setup))
-                   ctrl-id (atom nil)
-                   hb-id (atom nil)
-                   remote-ice (deterministic-ice-creds pid peer-fp)
-                   remote-sdp {:ip peer-ip
-                               :port peer-port
-                               :fingerprint peer-fp
-                               :remote-ice-ufrag (:ufrag remote-ice)
-                               :remote-ice-pwd (:pwd remote-ice)}
-                   callbacks {:on-open (fn [evt]
-                                         (when-not (:channel-id evt)
+     (let [sorted-ids (vec (sort-by name (keys nodes-cfg)))
+           node-idx (into {} (map-indexed (fn [i k] [k i]) sorted-ids))
+           multi-peer? (> (count nodes-cfg) 2)]
+       (doseq [pid peer-ids]
+         (let [peer-cfg (get nodes-cfg pid)
+               peer-ip (or (:ip4 peer-cfg) (:ip peer-cfg) "127.0.0.1")
+               base-peer-port (int (or (:port peer-cfg) 5000))
+               peer-port (if multi-peer?
+                           (+ base-peer-port (int (get node-idx node-id 0)))
+                           base-peer-port)
+               active? (neg? (compare (name node-id) (name pid)))
+               setup (if active? "active" "passive")]
+           (if (= transport :in-memory)
+             ;; In-memory descriptor
+             (swap! peer-conns-atom assoc pid {:peer-id pid :transport :in-memory})
+             ;; datachannel-clj descriptor
+             (try
+               (let [raw-peer-fp (:fingerprint peer-cfg)
+                     peer-fp (when (and (string? raw-peer-fp) (not (str/blank? raw-peer-fp)))
+                               (config/normalize-fingerprint raw-peer-fp))
+                     _ (when (and (not (:allow-unauthenticated? opts)) (str/blank? (str peer-fp)))
+                         (throw (ex-info (str "Missing required DTLS fingerprint for cluster peer: " (pr-str pid))
+                                         {:peer-id pid :peer-cfg peer-cfg})))
+                     base-local-port (int (or (get-in nodes-cfg [node-id :port]) 5000))
+                     local-port (if multi-peer?
+                                  (+ base-local-port (int (get node-idx pid 0)))
+                                  base-local-port)
+                     raw-node (api/create-node {:port local-port :setup setup})
+                     local-fp (when-let [raw-fp (:fingerprint identity)]
+                                (config/normalize-fingerprint raw-fp))
+                     local-ice (deterministic-ice-creds node-id local-fp)
+                     node (assoc raw-node
+                                 :cert-data (:cert-data identity)
+                                 :ice-creds local-ice
+                                 :local-sdp-params (assoc (:local-sdp-params raw-node)
+                                                          :ice-ufrag (:ufrag local-ice)
+                                                          :ice-pwd (:pwd local-ice)
+                                                          :fingerprint local-fp
+                                                          :setup setup))
+                     ctrl-id (atom nil)
+                     hb-id (atom nil)
+                     remote-ice (deterministic-ice-creds pid peer-fp)
+                     remote-sdp {:ip peer-ip
+                                 :port peer-port
+                                 :fingerprint peer-fp
+                                 :remote-ice-ufrag (:ufrag remote-ice)
+                                 :remote-ice-pwd (:pwd remote-ice)}
+                     callbacks {:on-open (fn [evt]
+                                           (when-not (:channel-id evt)
                                            ;; SCTP transport connected: create channels
-                                           (let [cid (api/create-data-channel! node "control" {:ordered true})
-                                                 hid (api/create-data-channel! node "heartbeat" {:ordered false :max-retransmits 0})]
-                                             (reset! ctrl-id cid)
-                                             (reset! hb-id hid)
-                                             (dispatch-event! {:type :cluster/peer-connected :peer-id pid} (System/currentTimeMillis)))))
-                              :on-message (fn [evt]
-                                            (let [payload (:payload evt)
-                                                  text (if (string? payload) payload (String. ^bytes payload StandardCharsets/UTF_8))
-                                                  msg (try (edn/read-string text) (catch Exception _ nil))]
-                                              (when msg
-                                                (dispatch-event! {:type :cluster/receive :from pid :message msg} (System/currentTimeMillis)))))
-                              :on-close (fn [_]
-                                          (dispatch-event! {:type :cluster/peer-disconnected :peer-id pid} (System/currentTimeMillis)))}]
-               (api/start! node remote-sdp callbacks)
-               (swap! peer-conns-atom assoc pid {:node node :control-id ctrl-id :heartbeat-id hb-id}))
-             (catch Exception e
-               (binding [*out* *err*]
-                 (println (str "Error establishing datachannel connection to peer " pid ": " (.getMessage e))))
-               (when (and (not (:allow-unauthenticated? opts)) (str/blank? (str (:fingerprint peer-cfg))))
-                 (throw e))
-               nil)))))
+                                             (let [cid (api/create-data-channel! node "control" {:ordered true})
+                                                   hid (api/create-data-channel! node "heartbeat" {:ordered false :max-retransmits 0})]
+                                               (reset! ctrl-id cid)
+                                               (reset! hb-id hid)
+                                               (dispatch-event! {:type :cluster/peer-connected :peer-id pid} (System/currentTimeMillis)))))
+                                :on-message (fn [evt]
+                                              (let [payload (:payload evt)
+                                                    text (if (string? payload) payload (String. ^bytes payload StandardCharsets/UTF_8))
+                                                    msg (try (edn/read-string text) (catch Exception _ nil))]
+                                                (when msg
+                                                  (dispatch-event! {:type :cluster/receive :from pid :message msg} (System/currentTimeMillis)))))
+                                :on-close (fn [_]
+                                            (dispatch-event! {:type :cluster/peer-disconnected :peer-id pid} (System/currentTimeMillis)))}]
+                 (api/start! node remote-sdp callbacks)
+                 (swap! peer-conns-atom assoc pid {:node node :control-id ctrl-id :heartbeat-id hb-id}))
+               (catch Exception e
+                 (binding [*out* *err*]
+                   (println (str "Error establishing datachannel connection to peer " pid ": " (.getMessage e))))
+                 (when (and (not (:allow-unauthenticated? opts)) (str/blank? (str (:fingerprint peer-cfg))))
+                   (throw e))
+                 nil))))))
 
      ;; Background periodic heartbeat ticker
      (.scheduleWithFixedDelay scheduled-executor

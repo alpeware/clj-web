@@ -197,7 +197,7 @@ cmd_init() {
     local proj="${RESOLVED_PROJECTS[$node]}"
     echo "--> Configuring firewall rules in ${proj}..."
     ensure_firewall_rule "$proj" "clj-web-public" "udp:53,tcp:53,tcp:25,tcp:80,tcp:443" "0.0.0.0/0" "clj-web"
-    ensure_firewall_rule "$proj" "clj-web-cluster" "udp:5000" "$cluster_ranges" "clj-web"
+    ensure_firewall_rule "$proj" "clj-web-cluster" "udp:5000-5005" "$cluster_ranges" "clj-web"
     ensure_firewall_rule "$proj" "clj-web-ssh" "tcp:22" "0.0.0.0/0" "clj-web"
   done
 
@@ -281,7 +281,19 @@ if [ ! -x /opt/jdk-25/bin/java ]; then
   rm -f "$TMP_JDK"
 fi
 
-# 4. App directories
+# 4. Free ports 53 (systemd-resolved stub) and 25 (exim4)
+echo "Disabling systemd-resolved DNS stub listener on port 53 and stopping exim4 on port 25..."
+sudo mkdir -p /etc/systemd/resolved.conf.d
+cat << 'RESOLVED_CFG' | sudo tee /etc/systemd/resolved.conf.d/no-stub.conf > /dev/null
+[Resolve]
+DNSStubListener=no
+RESOLVED_CFG
+sudo ln -sf /run/systemd/resolve/resolv.conf /etc/resolv.conf
+sudo systemctl restart systemd-resolved || true
+sudo systemctl stop exim4 2>/dev/null || true
+sudo systemctl disable exim4 2>/dev/null || true
+
+# 5. App directories
 echo "Creating application directories..."
 sudo mkdir -p /opt/clj-web /etc/clj-web /var/lib/clj-web /var/www/clj-web/public
 sudo chown -R "$(id -un):$(id -gn)" /opt/clj-web /etc/clj-web /var/lib/clj-web /var/www/clj-web/public
@@ -515,7 +527,20 @@ REMOTE_CFG
     local ip
     ip="$(get_ip "$node")"
     echo "Restarting clj-web on ${node}..."
-    ssh_cmd "$node" "sudo systemctl daemon-reload && sudo systemctl enable clj-web && sudo systemctl restart clj-web"
+    ssh_cmd "$node" bash -s << 'REMOTE_START'
+set -euo pipefail
+sudo mkdir -p /etc/systemd/resolved.conf.d
+if [ ! -f /etc/systemd/resolved.conf.d/no-stub.conf ]; then
+  printf "[Resolve]\nDNSStubListener=no\n" | sudo tee /etc/systemd/resolved.conf.d/no-stub.conf > /dev/null
+  sudo ln -sf /run/systemd/resolve/resolv.conf /etc/resolv.conf
+  sudo systemctl restart systemd-resolved || true
+fi
+sudo systemctl stop exim4 2>/dev/null || true
+sudo systemctl disable exim4 2>/dev/null || true
+sudo systemctl daemon-reload
+sudo systemctl enable clj-web
+sudo systemctl restart clj-web
+REMOTE_START
 
     echo "Verifying http://127.0.0.1/healthz on ${node}..."
     local retries=20
