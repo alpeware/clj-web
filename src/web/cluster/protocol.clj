@@ -98,6 +98,13 @@
                    :term new-term)
      :effects effects}))
 
+(defn- challenge-sync-targets
+  [st]
+  (let [all (:all-nodes st)]
+    (if (> (count all) 1)
+      (set all)
+      (set (:healthy-nodes st)))))
+
 (defn handle-cluster-event
   "Pure reducer function processing a cluster event given current state and now-ms.
    Returns {:state updated-state :outbound [messages...] :effects [effects...]}."
@@ -194,7 +201,7 @@
           (let [token (:token msg)
                 acks (conj (get-in st [:pending-challenge-acks token] #{(:node-id st)}) pid)
                 st' (assoc-in st [:pending-challenge-acks token] acks)
-                needed-peers (set (:healthy-nodes st'))
+                needed-peers (challenge-sync-targets st')
                 quorum? (set/subset? needed-peers acks)
                 quorum-effects (if quorum?
                                  [{:type :acme/challenge-quorum-reached :token token}]
@@ -266,7 +273,7 @@
                                  :token token
                                  :key-auth key-auth
                                  :dns-txt dns-txt}}
-            needed-peers (set (:healthy-nodes st))
+            needed-peers (challenge-sync-targets st)
             immediate-quorum? (<= (count needed-peers) 1)
             effects (cond-> (conj next-effects {:type :acme/challenge-updated :token token :key-auth key-auth})
                       immediate-quorum? (conj {:type :acme/challenge-quorum-reached :token token}))]

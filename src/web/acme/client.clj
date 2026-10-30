@@ -286,6 +286,20 @@
                    (or (nil? exp)
                        (< (- exp now-ms) renew-window-ms)))))))))
 
+(defn cluster-ready-for-acme?
+  "Returns true when this node is the cluster leader and all configured cluster
+   nodes are currently healthy (connected), preventing ACME HTTP-01 validation
+   races during rolling restarts."
+  [cluster-mgr]
+  (if-not cluster-mgr
+    true
+    (let [st @(:state-atom cluster-mgr)
+          all-nodes (:all-nodes st)
+          healthy-nodes (:healthy-nodes st)]
+      (and (= :leader (:role st))
+           (or (empty? all-nodes)
+               (= (set all-nodes) (set healthy-nodes)))))))
+
 (defn start-acme-loop!
   "Starts background renewal check ticker on scheduled executor.
    Automatically triggers certificate provisioning when this node is cluster leader
@@ -305,31 +319,28 @@
                   (let [now (System/currentTimeMillis)
                         {:keys [consecutive-failures next-attempt-ms]} @retry-state]
                     (when (>= now (long next-attempt-ms))
-                      (let [leader? (if cluster-mgr
-                                      (= :leader (:role @(:state-atom cluster-mgr)))
-                                      true)]
-                        (when (and leader? (needs-renewal? config tls-manager now))
-                          (try
-                            (println (str "Starting ACME certificate provisioning for " (:domain config) " via " (get-in config [:acme :directory-url])))
-                            (let [res (provision-certificate! config cluster-mgr tls-manager opts)]
-                              (println (str "Successfully provisioned ACME certificate for " (:domain config) " (expires: " (:expires-at res) ")"))
-                              (swap! retry-state assoc :consecutive-failures 0 :next-attempt-ms 0))
-                            (catch Exception e
-                              (let [failures (inc (long consecutive-failures))
-                                    backoff-delay (min 86400000 (* base-backoff-ms (bit-shift-left 1 (min failures 10))))
-                                    next-attempt (+ now backoff-delay)]
-                                (swap! retry-state assoc
-                                       :consecutive-failures failures
-                                       :next-attempt-ms next-attempt)
-                                (binding [*out* *err*]
-                                  (println (str "Error in ACME renewal loop (failure #" failures
-                                                ", next retry in " backoff-delay "ms): " (.getMessage e))))
-                                (when (fn? on-error)
-                                  (try
-                                    (on-error e failures)
-                                    (catch Exception err-handler-ex
-                                      (binding [*out* *err*]
-                                        (println (str "Error in ACME on-error handler: " (.getMessage err-handler-ex))))))))))))))))]
+                      (when (and (cluster-ready-for-acme? cluster-mgr) (needs-renewal? config tls-manager now))
+                        (try
+                          (println (str "Starting ACME certificate provisioning for " (:domain config) " via " (get-in config [:acme :directory-url])))
+                          (let [res (provision-certificate! config cluster-mgr tls-manager opts)]
+                            (println (str "Successfully provisioned ACME certificate for " (:domain config) " (expires: " (:expires-at res) ")"))
+                            (swap! retry-state assoc :consecutive-failures 0 :next-attempt-ms 0))
+                          (catch Exception e
+                            (let [failures (inc (long consecutive-failures))
+                                  backoff-delay (min 86400000 (* base-backoff-ms (bit-shift-left 1 (min failures 10))))
+                                  next-attempt (+ now backoff-delay)]
+                              (swap! retry-state assoc
+                                     :consecutive-failures failures
+                                     :next-attempt-ms next-attempt)
+                              (binding [*out* *err*]
+                                (println (str "Error in ACME renewal loop (failure #" failures
+                                              ", next retry in " backoff-delay "ms): " (.getMessage e))))
+                              (when (fn? on-error)
+                                (try
+                                  (on-error e failures)
+                                  (catch Exception err-handler-ex
+                                    (binding [*out* *err*]
+                                      (println (str "Error in ACME on-error handler: " (.getMessage err-handler-ex)))))))))))))))]
      (.scheduleWithFixedDelay ^ScheduledExecutorService executor
                               ^Runnable task
                               0

@@ -293,3 +293,25 @@
         ((:stop-fn mock-server))
         (mesh/stop-cluster! cluster-mgr)
         (delete-dir-recursively temp-dir)))))
+
+(deftest test-cluster-ready-for-acme
+  (testing "nil cluster-mgr returns true"
+    (is (true? (client/cluster-ready-for-acme? nil))))
+
+  (testing ":follower role returns false"
+    (let [cluster-mgr {:state-atom (atom {:role :follower
+                                          :all-nodes #{:ns1 :ns2 :ns3}
+                                          :healthy-nodes #{:ns1 :ns2 :ns3}})}]
+      (is (false? (client/cluster-ready-for-acme? cluster-mgr)))))
+
+  (testing ":leader role in a 3-node cluster with only 2 healthy nodes returns false"
+    (let [cluster-mgr {:state-atom (atom {:role :leader
+                                          :all-nodes #{:ns1 :ns2 :ns3}
+                                          :healthy-nodes #{:ns1 :ns2}})}]
+      (is (false? (client/cluster-ready-for-acme? cluster-mgr)))))
+
+  (testing ":leader role in a 3-node cluster with all 3 nodes healthy returns true"
+    (let [cluster-mgr {:state-atom (atom {:role :leader
+                                          :all-nodes #{:ns1 :ns2 :ns3}
+                                          :healthy-nodes #{:ns1 :ns2 :ns3}})}]
+      (is (true? (client/cluster-ready-for-acme? cluster-mgr))))))
