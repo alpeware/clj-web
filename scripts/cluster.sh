@@ -19,6 +19,7 @@ BILLING_ACCOUNT="${BILLING_ACCOUNT:-00A760-ADD23B-93C934}"
 SSH_USER="${SSH_USER:-cljweb}"
 SSH_KEY_DIR="${ROOT_DIR}/.ssh"
 SSH_KEY="${SSH_KEY_DIR}/clj_web_ed25519"
+SIGNING_KEY="${SSH_KEY_DIR}/bitecho_signing_ed25519"
 
 NODES=("ns1" "ns2" "ns3")
 
@@ -378,6 +379,276 @@ EDN_EOF
   echo "================================================================================"
 }
 
+publish_git_repos() {
+  echo "--> Publishing canonical Git repositories and generating documentation..."
+  mkdir -p "${SSH_KEY_DIR}"
+  chmod 700 "${SSH_KEY_DIR}"
+  if [[ ! -f "${SIGNING_KEY}" ]]; then
+    echo "Generating release signing key at ${SIGNING_KEY}..."
+    ssh-keygen -t ed25519 -N "" -C "release@${DOMAIN}" -f "${SIGNING_KEY}"
+  fi
+  chmod 600 "${SIGNING_KEY}"
+  chmod 644 "${SIGNING_KEY}.pub"
+
+  mkdir -p "${ROOT_DIR}/public/git"
+
+  # Write public/keys.txt
+  local pubkey
+  pubkey="$(cat "${SIGNING_KEY}.pub")"
+  cat << KEYS_EOF > "${ROOT_DIR}/public/keys.txt"
+# Bitecho Release Signing Public Key (SSH Ed25519)
+# Identity: release@${DOMAIN}
+#
+# To verify signed git tags:
+#   1. Add this key to your allowed_signers file:
+#      echo "release@${DOMAIN} ${pubkey}" >> ~/.config/git/allowed_signers
+#   2. Configure git:
+#      git config gpg.ssh.allowedSignersFile ~/.config/git/allowed_signers
+#   3. Verify tag:
+#      git tag -v verified
+#
+# Allowed signers entry:
+release@${DOMAIN} ${pubkey}
+KEYS_EOF
+
+  local repos=("bitecho" "clj-datachannel" "clj-web")
+  local -A repo_shas=()
+  local -A repo_branches=()
+
+  for repo in "${repos[@]}"; do
+    local src_repo="$(cd "${ROOT_DIR}/.." && pwd)/${repo}"
+    local bare_repo="${ROOT_DIR}/public/git/${repo}.git"
+
+    if [[ ! -d "${src_repo}/.git" ]]; then
+      echo "Error: Source repository not found at ${src_repo}" >&2
+      return 1
+    fi
+
+    local def_branch
+    def_branch="$(git -C "${src_repo}" symbolic-ref --short HEAD 2>/dev/null || git -C "${src_repo}" branch --show-current 2>/dev/null || echo "master")"
+    if [[ -z "$def_branch" ]]; then def_branch="master"; fi
+
+    echo "Exporting bare repository for ${repo} (${def_branch})..."
+    rm -rf "${bare_repo}"
+    git clone --bare --quiet "${src_repo}" "${bare_repo}"
+
+    # Ensure HEAD points to default branch
+    git --git-dir="${bare_repo}" symbolic-ref HEAD "refs/heads/${def_branch}"
+
+    # Sign annotated tag 'verified'
+    git --git-dir="${bare_repo}" \
+      -c gpg.format=ssh \
+      -c user.signingkey="${SIGNING_KEY}" \
+      -c user.name="Bitecho Release" \
+      -c user.email="release@${DOMAIN}" \
+      tag -s -f verified HEAD -m "Verified snapshot of ${repo} on ${DOMAIN}"
+
+    # Enable dumb HTTP git transport
+    git --git-dir="${bare_repo}" update-server-info
+    if [[ -f "${bare_repo}/hooks/post-update.sample" ]]; then
+      cp -f "${bare_repo}/hooks/post-update.sample" "${bare_repo}/hooks/post-update"
+      chmod +x "${bare_repo}/hooks/post-update"
+    fi
+
+    local head_sha
+    head_sha="$(git --git-dir="${bare_repo}" rev-parse HEAD)"
+    repo_shas["$repo"]="$head_sha"
+    repo_branches["$repo"]="$def_branch"
+    echo "  ${repo}: ${def_branch} @ ${head_sha}"
+  done
+
+  local b_sha="${repo_shas[bitecho]}"
+  local b_branch="${repo_branches[bitecho]}"
+  local d_sha="${repo_shas[clj-datachannel]}"
+  local d_branch="${repo_branches[clj-datachannel]}"
+  local w_sha="${repo_shas[clj-web]}"
+  local w_branch="${repo_branches[clj-web]}"
+
+  cat << GIT_INDEX_EOF > "${ROOT_DIR}/public/git/index.md"
+# Canonical Git Repositories
+
+Self-hosted bare Git repositories for the Bitecho software ecosystem, served directly over HTTPS via dumb HTTP transport (\`git update-server-info\`). Every repository includes an SSH-signed annotated tag \`verified\` cryptographically attesting the snapshot against the public key at [\`/keys.txt\`](/keys.txt).
+
+---
+
+## 1. bitecho
+
+Core decentralized peer-to-peer messaging and coordination protocol in Clojure.
+
+- **Clone URL**: \`https://${DOMAIN}/git/bitecho.git\`
+- **Default Branch**: \`${b_branch}\`
+- **HEAD Commit**: \`${b_sha}\`
+- **GitHub Backup Mirror**: [https://github.com/alpeware/bitecho](https://github.com/alpeware/bitecho)
+
+### Clojure CLI (\`deps.edn\`)
+
+\`\`\`clojure
+alpeware/bitecho {:git/url "https://${DOMAIN}/git/bitecho.git"
+                 :git/sha "${b_sha}"}
+\`\`\`
+
+---
+
+## 2. clj-datachannel
+
+Pure Clojure WebRTC DataChannels library (SCTP over DTLS over UDP) targeting OpenJDK 25.
+
+- **Clone URL**: \`https://${DOMAIN}/git/clj-datachannel.git\`
+- **Default Branch**: \`${d_branch}\`
+- **HEAD Commit**: \`${d_sha}\`
+- **GitHub Backup Mirror**: [https://github.com/alpeware/clj-datachannel](https://github.com/alpeware/clj-datachannel)
+
+### Clojure CLI (\`deps.edn\`)
+
+\`\`\`clojure
+alpeware/clj-datachannel {:git/url "https://${DOMAIN}/git/clj-datachannel.git"
+                         :git/sha "${d_sha}"}
+\`\`\`
+
+---
+
+## 3. clj-web
+
+Self-contained 3-node cluster system combining authoritative DNS (:53), static HTTPS (:443) with Virtual Threads, inbound SMTP (:25) with STARTTLS, ACME v2 Let's Encrypt automation, and WebRTC DataChannel cluster mesh control plane (:5000).
+
+- **Clone URL**: \`https://${DOMAIN}/git/clj-web.git\`
+- **Default Branch**: \`${w_branch}\`
+- **HEAD Commit**: \`${w_sha}\`
+- **GitHub Backup Mirror**: [https://github.com/alpeware/clj-web](https://github.com/alpeware/clj-web)
+
+### Clojure CLI (\`deps.edn\`)
+
+\`\`\`clojure
+alpeware/clj-web {:git/url "https://${DOMAIN}/git/clj-web.git"
+                 :git/sha "${w_sha}"}
+\`\`\`
+
+---
+
+## Cryptographic Verification
+
+All repositories publish an SSH-signed annotated tag \`verified\` pointing to the release snapshot.
+
+1. **Configure Git Allowed Signers**:
+   \`\`\`bash
+   curl -sSL https://${DOMAIN}/keys.txt | grep ssh-ed25519 >> ~/.config/git/allowed_signers
+   git config gpg.ssh.allowedSignersFile ~/.config/git/allowed_signers
+   \`\`\`
+
+2. **Verify Repository Tag**:
+   \`\`\`bash
+   git clone https://${DOMAIN}/git/bitecho.git
+   cd bitecho
+   git tag -v verified
+   \`\`\`
+GIT_INDEX_EOF
+
+  cat << INDEX_EOF > "${ROOT_DIR}/public/index.md"
+# Bitecho (bitecho.org)
+
+Welcome to **Bitecho**, a high-performance, decentralized peer-to-peer messaging and coordination protocol built on pure Clojure and WebRTC DataChannels.
+
+## Gentoo / Source-First Philosophy
+
+Bitecho embraces a source-first distribution model inspired by Gentoo Linux:
+- **Canonical Git Origin**: Software is published directly from self-hosted canonical bare Git repositories hosted on the Bitecho 3-node cluster.
+- **Cryptographic Provenance**: Every repository snapshot is signed with an SSH Ed25519 release key (\`verified\` tag) documented at [\`/keys.txt\`](/keys.txt).
+- **Zero Opaque Binaries**: Autonomous agents and developers fetch and build pure Clojure source code directly via Clojure CLI (\`deps.edn\`) with zero intermediate binary registries.
+
+---
+
+## Canonical Git Repositories
+
+| Repository | Default Branch | HEAD Commit | Canonical Clone URL |
+| :--- | :--- | :--- | :--- |
+| **bitecho** | \`${b_branch}\` | \`${b_sha:0:12}\` | \`https://${DOMAIN}/git/bitecho.git\` |
+| **clj-datachannel** | \`${d_branch}\` | \`${d_sha:0:12}\` | \`https://${DOMAIN}/git/clj-datachannel.git\` |
+| **clj-web** | \`${w_branch}\` | \`${w_sha:0:12}\` | \`https://${DOMAIN}/git/clj-web.git\` |
+
+### Clojure CLI (\`deps.edn\`) Dependencies
+
+\`\`\`clojure
+;; In your deps.edn
+{:deps
+ {alpeware/bitecho {:git/url "https://${DOMAIN}/git/bitecho.git"
+                   :git/sha "${b_sha}"}
+  alpeware/clj-datachannel {:git/url "https://${DOMAIN}/git/clj-datachannel.git"
+                           :git/sha "${d_sha}"}
+  alpeware/clj-web {:git/url "https://${DOMAIN}/git/clj-web.git"
+                   :git/sha "${w_sha}"}}}
+\`\`\`
+
+---
+
+## Cryptographic Verification
+
+All canonical repositories include an SSH-signed annotated tag \`verified\` pointing to the canonical HEAD.
+
+\`\`\`bash
+# 1. Trust the Bitecho release signing key
+curl -sSL https://${DOMAIN}/keys.txt | grep ssh-ed25519 >> ~/.config/git/allowed_signers
+git config gpg.ssh.allowedSignersFile ~/.config/git/allowed_signers
+
+# 2. Clone and verify
+git clone https://${DOMAIN}/git/bitecho.git
+cd bitecho
+git tag -v verified
+\`\`\`
+
+---
+
+## Cluster Architecture
+
+Bitecho runs across 3 geographically distributed GCP \`e2-micro\` nodes (\`ns1\` in US West, \`ns2\` in US Central, \`ns3\` in US East):
+- **Authoritative DNS** (UDP & TCP port 53): Low-TTL multi-A records with automatic node health filtering.
+- **Static Content Engine** (TCP port 80 & 443): JVM 25 Virtual Threads with transparent Gzip, LRU caching, and byte-range streaming.
+- **Inbound SMTP** (TCP port 25): STARTTLS listener with domain-allowlist filtering and cluster-wide email replication.
+- **ACME v2 Automation**: Automated Let's Encrypt certificate issuance with zero-downtime hot-reloading.
+- **P2P Mesh Control Plane** (UDP port 5000): Encrypted WebRTC DataChannels (\`clj-datachannel\`) for cluster heartbeats, challenge quorum, and state replication.
+
+---
+
+## Backup Mirrors (GitHub)
+
+- [https://github.com/alpeware/bitecho](https://github.com/alpeware/bitecho)
+- [https://github.com/alpeware/clj-datachannel](https://github.com/alpeware/clj-datachannel)
+- [https://github.com/alpeware/clj-web](https://github.com/alpeware/clj-web)
+
+---
+
+## Quick Links
+
+- [Canonical Git Repositories](/git/)
+- [Release Signing Key](/keys.txt)
+- [LLM / Agent Overview](/llms.txt)
+- [Cluster Healthcheck](/healthz)
+INDEX_EOF
+
+  cp -f "${ROOT_DIR}/public/index.md" "${ROOT_DIR}/public/llms.txt"
+  echo "Documentation generated at public/git/index.md, public/index.md, and public/llms.txt"
+}
+
+cmd_publish_git() {
+  echo "=== Publishing Canonical Git Repositories and Documentation ==="
+  publish_git_repos
+
+  echo ""
+  echo "--> Syncing public/ directory to all cluster nodes..."
+  for node in "${NODES[@]}"; do
+    local ip
+    ip="$(get_ip "$node")"
+    if [[ -z "$ip" ]]; then
+      echo "Warning: IP address for node ${node} could not be resolved. Skipping." >&2
+      continue
+    fi
+    echo "Syncing public/ to ${node} (${ip})..."
+    rsync -az --delete -e "ssh -o StrictHostKeyChecking=accept-new -i ${SSH_KEY}" \
+      "${ROOT_DIR}/public/" "${SSH_USER}@${ip}:/var/www/clj-web/public/"
+  done
+  echo ""
+  echo "=== Git repositories successfully published and synced! ==="
+}
+
 cmd_deploy() {
   local staging=false
   local reset_certs=false
@@ -519,6 +790,9 @@ fi
 mv -f /etc/clj-web/config.edn.new /etc/clj-web/config.edn
 REMOTE_CFG
   done
+
+  # Export bare git repos, sign release tags, and generate documentation
+  publish_git_repos
 
   # 5. Sync static public/ directory
   echo "--> Step 5/6: Syncing public/ directory to /var/www/clj-web/public/..."
@@ -841,6 +1115,7 @@ Usage: $0 <command> [options]
 Commands:
   init                  Provision GCP projects, static IPs, firewall rules, VMs, and bootstrap OpenJDK 25
   deploy [--staging]    Build uberjar, sync public/ assets, generate DTLS fingerprints, render configs, and restart
+  publish-git           Export bare git repos, sign release tags, generate docs, and sync to cluster
   status                Display cluster node states, IPs, memory usage, systemd status, DNS records, and email counts
   logs [ns1|ns2|ns3]    View systemd journal logs (streams if specific node is specified)
   mail [ns1|ns2|ns3]    List saved RFC 822 .eml emails replicated across the cluster
@@ -865,6 +1140,10 @@ case "${1:-help}" in
   deploy)
     shift
     cmd_deploy "$@"
+    ;;
+  publish-git)
+    shift
+    cmd_publish_git
     ;;
   status)
     cmd_status

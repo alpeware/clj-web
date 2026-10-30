@@ -1,0 +1,13 @@
+# Bitecho Release Signing Public Key (SSH Ed25519)
+# Identity: release@bitecho.org
+#
+# To verify signed git tags:
+#   1. Add this key to your allowed_signers file:
+#      echo "release@bitecho.org ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBMQDXqhPOh037EfukNS+O0QXgL0wsWi/Yaf6OnfiQMw release@bitecho.org" >> ~/.config/git/allowed_signers
+#   2. Configure git:
+#      git config gpg.ssh.allowedSignersFile ~/.config/git/allowed_signers
+#   3. Verify tag:
+#      git tag -v verified
+#
+# Allowed signers entry:
+release@bitecho.org ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBMQDXqhPOh037EfukNS+O0QXgL0wsWi/Yaf6OnfiQMw release@bitecho.org

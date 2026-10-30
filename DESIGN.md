@@ -7,7 +7,7 @@
 2. **HTTP/HTTPS Static Web Server** (TCP ports 80 & 443 via JDK's `com.sun.net.httpserver`)
 3. **Inbound SMTP Server** (TCP port 25 with `STARTTLS` for receiving domain/registrar/verification emails)
 4. **ACME v2 (Let's Encrypt) Client** with automated certificate provisioning and zero-downtime renewal
-5. **3-Node Peer-to-Peer Cluster Control Plane** powered by [`datachannel-clj`](https://github.com/alpeware/datachannel-clj) (SCTP over DTLS over UDP) for leader election, peer health probing, ACME challenge synchronization, TLS keypair distribution, and inbound email replication
+5. **3-Node Peer-to-Peer Cluster Control Plane** powered by [`clj-datachannel`](https://github.com/alpeware/clj-datachannel) (SCTP over DTLS over UDP) for leader election, peer health probing, ACME challenge synchronization, TLS keypair distribution, and inbound email replication
 
 ### Target Environment & Hard Constraints
 
@@ -18,7 +18,7 @@
 | **Network Egress** | **1 GB / month** free-tier egress per VM | Aggressive `ETag` / `304 Not Modified`, pre-computed `.gz` compression, strict per-IP token-bucket rate limiting, no bloat (no JS/CSS frameworks), DNS amplification guards, no DNSSEC bloat. |
 | **Redundancy** | 3 static IPv4/IPv6 nodes (`ns1`, `ns2`, `ns3`) | Registered as personal nameservers via Namecheap glue records; DNS returns all healthy node IPs (`TTL 60s`) and `MX` records pointing to the cluster. |
 | **Primary Audience** | Autonomous AI agents & CLI tools (`curl`, `deps.edn`, `mvn`) | Deterministic plain-text/Markdown docs, `.clj` source, scripts, and Maven/Clojure JAR artifacts (`Content-Type`, `ETag`, `SHA-256` headers, HTTP `Range` support). |
-| **Dependencies** | Minimal runtime dependencies | Only `org.clojure/clojure`, `org.clojure/data.json` (for ACME JSON/JWS), and `alpeware/datachannel-clj` (pure Clojure WebRTC DataChannels). |
+| **Dependencies** | Minimal runtime dependencies | Only `org.clojure/clojure`, `org.clojure/data.json` (for ACME JSON/JWS), and `alpeware/clj-datachannel` (pure Clojure WebRTC DataChannels). |
 
 ---
 
@@ -48,7 +48,7 @@ All three `e2-micro` instances run an identical `clj-web` binary and configurati
 
 ### 2.2 Separation of Pure Core ("Sans-IO") and I/O Edges
 
-Following the architectural style of `datachannel-clj`, `clj-web` separates pure protocol state machines from thin JDK NIO/socket wrappers:
+Following the architectural style of `clj-datachannel`, `clj-web` separates pure protocol state machines from thin JDK NIO/socket wrappers:
 
 ```
 src/
@@ -61,7 +61,7 @@ src/
     │   └── server.clj      ;; Java NIO DatagramChannel (UDP :53) + Virtual-Thread ServerSocket (TCP :53)
     ├── cluster/
     │   ├── protocol.clj    ;; Pure leader election, heartbeat tracker, & state replication reducer
-    │   └── mesh.clj        ;; datachannel-clj node manager connecting the 3 peers over UDP :5000
+    │   └── mesh.clj        ;; clj-datachannel node manager connecting the 3 peers over UDP :5000
     ├── acme/
     │   ├── jws.clj         ;; Pure ES256 JWS signing, thumbprints, CSR (PKCS#10) & PEM encoding
     │   └── client.clj      ;; RFC 8555 ACME v2 state machine over java.net.http.HttpClient
@@ -128,9 +128,9 @@ To make the three VMs self-hosting nameservers for `<domain>` (e.g., `alpeware.c
 
 ## 4. Cluster Control Plane & Leader Election (`web.cluster.*`)
 
-### 4.1 `datachannel-clj` Mesh Transport
+### 4.1 `clj-datachannel` Mesh Transport
 
-The 3 nodes form a static full mesh (3 bidirectional peer connections total) over **UDP port 5000** using `datachannel-clj`:
+The 3 nodes form a static full mesh (3 bidirectional peer connections total) over **UDP port 5000** using `clj-datachannel`:
 - **Static Signalingless Bootstrap**: Because all 3 VMs have static IPs known in `config.edn`, no external signaling server is required. For each pair of nodes $(i, j)$ with $i < j$, node $i$ initiates with `:setup "active"` and node $j$ listens with `:setup "passive"`.
 - **Mutual Authentication via DTLS Fingerprints**: Each node holds a persistent node identity keypair (`/var/lib/clj-web/cluster/node-identity.edn`). `config.edn` lists the expected SHA-256 certificate fingerprint (`:fingerprint`) of all 3 nodes. Authentication is strictly fail-closed: fingerprints are normalized (whitespace trimmed, optional case-insensitive `SHA-256:` prefix stripped, uppercased to 32 hex pairs), and if missing, blank, or mismatched, the handshake is rejected.
 - **Data Channels**: Once connected, nodes open an ordered, reliable SCTP channel (`"control"`, `:ordered true`) for leader election, TLS keypair distribution, and inbound email replication, plus an unordered channel (`"heartbeat"`, `:ordered false :max-retransmits 0`) for low-overhead liveness probes.
@@ -236,7 +236,7 @@ To receive verification emails from domain registrars (e.g., Namecheap whois/dom
 
 - **Virtual-Thread Socket Loop**: Accepts connections on TCP port 25 with a hard **30-second socket read timeout** (`SO_TIMEOUT`) and a maximum of 10 concurrent SMTP sessions to prevent slowloris abuse.
 - **Atomic `.eml` Persistence**: Completed messages are prepended with a standard `Received:` trace header and written atomically to `/var/lib/clj-web/mail/<timestamp>-<sha256-prefix>.eml`.
-- **Cluster Replication**: Because a sending MTA may deliver to `ns2` (`MX 20`) or `ns3` (`MX 30`) if `ns1` is busy, the receiving node broadcasts `{:type :smtp/mail-received :id ... :from ... :to ... :raw-eml-b64 ...}` over the `datachannel-clj` `"control"` channel so all 3 nodes store a synchronized copy of received emails in `/var/lib/clj-web/mail/`.
+- **Cluster Replication**: Because a sending MTA may deliver to `ns2` (`MX 20`) or `ns3` (`MX 30`) if `ns1` is busy, the receiving node broadcasts `{:type :smtp/mail-received :id ... :from ... :to ... :raw-eml-b64 ...}` over the `clj-datachannel` `"control"` channel so all 3 nodes store a synchronized copy of received emails in `/var/lib/clj-web/mail/`.
 
 ---
 
@@ -355,10 +355,10 @@ The implementation is structured into **7 incremental, testable phases**, buildi
 - Implement `web.smtp.server`: Virtual-Thread TCP `:25` server with `STARTTLS` socket upgrade (sharing `ssl-context-atom`), 30s read timeouts, atomic `.eml` persistence to `<state-dir>/mail/`, and cluster replication hook.
 - Verify with state-machine property tests and live TCP + `STARTTLS` SMTP delivery tests (`test/web/smtp/*`).
 
-### Phase 5: Cluster Control Plane via `datachannel-clj` (`web.cluster.*`)
+### Phase 5: Cluster Control Plane via `clj-datachannel` (`web.cluster.*`)
 - Implement `web.cluster.protocol`: Pure deterministic state machine for 3-node peer liveness (`:healthy` vs `:unreachable`), quorum-backed ($\ge 2$ of 3) Bully leader election, ACME challenge token replication (`:acme/challenge-set` / `:acme/challenge-ack`), TLS bundle broadcast (`:tls/bundle`), and inbound email replication (`:smtp/mail-received`).
-- Implement `web.cluster.mesh`: `datachannel-clj` node wrapper connecting the 3 peers over UDP `:5000` with DTLS fingerprint verification.
-- Verify with deterministic 3-node partition/failover simulations and local 3-peer `datachannel-clj` mesh tests (`test/web/cluster/*`).
+- Implement `web.cluster.mesh`: `clj-datachannel` node wrapper connecting the 3 peers over UDP `:5000` with DTLS fingerprint verification.
+- Verify with deterministic 3-node partition/failover simulations and local 3-peer `clj-datachannel` mesh tests (`test/web/cluster/*`).
 
 ### Phase 6: ACME v2 Let's Encrypt Client (`web.acme.*`)
 - Implement `web.acme.jws`: Pure ECDSA P-256 (`ES256`) JWS signing (`SHA256withECDSAinP1363Format`), RFC 7638 JWK thumbprint computation, `<token>.<thumbprint>` key authorization, and PKCS#10 CSR generation for `<domain>` + `ns1..ns3.<domain>`.

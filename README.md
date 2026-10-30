@@ -20,7 +20,7 @@ See [DESIGN.md](DESIGN.md) for the complete architectural specification and impl
   - Pure Sans-IO RFC 5321 session state machine + Virtual-Thread TCP listener for receiving domain verification, registrar (e.g., Namecheap), and security emails (`admin@`, `hostmaster@`, `postmaster@`, `security@`).
   - Supports `STARTTLS` reusing the hot-swappable Let's Encrypt `SSLContext` (whose certificate covers `ns1..ns3.<domain>`).
   - Strict open-relay rejection (`550 5.7.1`), 128 KB message size cap (`552`), atomic `.eml` storage in `/var/lib/clj-web/mail/`, and automatic `.eml` replication across all 3 cluster nodes.
-- **P2P Cluster Control Plane via [`datachannel-clj`](https://github.com/alpeware/datachannel-clj)**:
+- **P2P Cluster Control Plane via [`clj-datachannel`](https://github.com/alpeware/clj-datachannel)**:
   - Connects the 3 static-IP nodes over encrypted WebRTC DataChannels (SCTP over DTLS over UDP port 5000) authenticated via pinned SHA-256 certificate fingerprints.
   - Quorum-backed leader election ensures a single leader coordinates Let's Encrypt certificate provisioning and renewal.
   - Replicates HTTP-01 challenge tokens prior to validation, distributes issued TLS keypairs, and syncs received `.eml` emails across peers.
@@ -39,7 +39,7 @@ See [DESIGN.md](DESIGN.md) for the complete architectural specification and impl
 
 - [`org.clojure/clojure`](https://clojure.org/) (`1.12.4`)
 - [`org.clojure/data.json`](https://github.com/clojure/data.json) (`2.5.1`) — ACME v2 JSON/JWS serialization
-- [`alpeware/datachannel-clj`](https://github.com/alpeware/datachannel-clj) — Pure Clojure WebRTC DataChannels (SCTP/DTLS/UDP) for 3-node cluster coordination
+- [`alpeware/clj-datachannel`](https://github.com/alpeware/clj-datachannel) — Pure Clojure WebRTC DataChannels (SCTP/DTLS/UDP) for 3-node cluster coordination
 
 ---
 
@@ -73,7 +73,7 @@ Create 3 `e2-micro` instances (e.g., in `us-central1`, `us-east1`, `us-west1` to
 - `udp/53`, `tcp/53` (Authoritative DNS)
 - `tcp/25` (Inbound SMTP)
 - `tcp/80`, `tcp/443` (HTTP & HTTPS)
-- `udp/5000` (Cluster `datachannel-clj` mesh, restricted to `IP1`, `IP2`, `IP3`)
+- `udp/5000` (Cluster `clj-datachannel` mesh, restricted to `IP1`, `IP2`, `IP3`)
 
 ### Step 2: Register Personal Nameservers (Glue Records) at Namecheap
 

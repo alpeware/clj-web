@@ -6,3 +6,4 @@
 /.ssh/
 /cluster.edn
 /.cluster.env
+/public/git/

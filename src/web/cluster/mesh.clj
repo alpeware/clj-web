@@ -1,5 +1,5 @@
 (ns web.cluster.mesh
-  "datachannel-clj transport and cluster lifecycle manager.
+  "clj-datachannel transport and cluster lifecycle manager.
    Coordinates static signalingless WebRTC DataChannel full-mesh over UDP,
    mutual DTLS fingerprint authentication, periodic virtual-thread heartbeat ticker,
    and execution of cluster effects (ACME challenge sync, TLS hot-reload, email replication)."
@@ -128,7 +128,7 @@
 (declare publish-acme-challenge! clear-acme-challenge! publish-tls-bundle! replicate-mail! stop-cluster!)
 
 (defn start-cluster!
-  "Starts the cluster node control plane, connecting to configured peers via datachannel-clj.
+  "Starts the cluster node control plane, connecting to configured peers via clj-datachannel.
    Options:
      :on-leader-elected (fn [leader-id term])
      :on-challenge-quorum (fn [token])
@@ -213,7 +213,7 @@
                      ;; In-memory transport: deliver directly via receiver callback
                      (when-let [recv-fn (:send-fn conn)]
                        (try (recv-fn message) (catch Exception _ nil)))
-                     ;; datachannel-clj transport
+                     ;; clj-datachannel transport
                      (let [dc-node (:node conn)
                            ch-id (if (= channel :heartbeat)
                                    @(:heartbeat-id conn)
@@ -251,7 +251,7 @@
            (if (= transport :in-memory)
              ;; In-memory descriptor
              (swap! peer-conns-atom assoc pid {:peer-id pid :transport :in-memory})
-             ;; datachannel-clj descriptor
+             ;; clj-datachannel descriptor
              (let [peer-cfg (get nodes-cfg pid)]
                (try
                  (when-let [old-node (:node (get @peer-conns-atom pid))]
