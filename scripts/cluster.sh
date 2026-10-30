@@ -566,6 +566,7 @@ REMOTE_START
 }
 
 cmd_status() {
+  local rtype="${1:-A}"
   echo "=== 3-Node Cluster Status (${DOMAIN}) ==="
   printf "%-6s %-22s %-16s %-10s %-10s %-14s %-10s %-6s\n" \
     "Node" "Project" "IP" "VM State" "Service" "Memory" "DNS (A)" "Emails"
@@ -589,7 +590,11 @@ cmd_status() {
         svc_state="$(ssh_cmd "$node" "systemctl is-active clj-web 2>/dev/null || echo inactive" 2>/dev/null || echo "UNREACHABLE")"
         mem_usage="$(ssh_cmd "$node" "free -m | awk '/Mem:/ {print \$3 \"/\" \$2 \"M\"}'" 2>/dev/null || echo "N/A")"
         email_count="$(ssh_cmd "$node" "find /var/lib/clj-web/mail -type f -name '*.eml' 2>/dev/null | wc -l" 2>/dev/null || echo "0")"
-        dns_check="$(dig @"$ip" "${DOMAIN}" A +short +time=2 +tries=1 2>/dev/null | tr '\n' ' ' | sed 's/ $//' || echo "FAILED")"
+        if command -v dig >/dev/null 2>&1; then
+          dns_check="$(dig @"$ip" "${DOMAIN}" "$rtype" +short +time=2 +tries=1 2>/dev/null | tr '\n' ' ' | sed 's/ $//' || echo "FAILED")"
+        else
+          dns_check="$(ssh_cmd "$node" "dig @127.0.0.1 '${DOMAIN}' '$rtype' +short +time=2 +tries=1 2>/dev/null" 2>/dev/null | tr '\n' ' ' | sed 's/ $//' || echo "FAILED")"
+        fi
         if [[ -z "$dns_check" ]]; then dns_check="NO_RECORDS"; fi
       else
         svc_state="STOPPED"

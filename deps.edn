@@ -2,7 +2,7 @@
  :deps {org.clojure/clojure {:mvn/version "1.12.4"}
         org.clojure/data.json {:mvn/version "2.5.1"}
         alpeware/datachannel-clj {:git/url "https://github.com/alpeware/datachannel-clj"
-                                  :git/sha "c60faa6ce783d85bd00c9023868e5df8a8a07424"}}
+                                  :git/sha "9708426a4093fadd83682d5c9a3b6997a22498d4"}}
  :jvm-opts ["--enable-native-access=ALL-UNNAMED"
             "--add-exports=java.base/sun.security.tools.keytool=ALL-UNNAMED"
             "--add-exports=java.base/sun.security.x509=ALL-UNNAMED"
