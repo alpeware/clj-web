@@ -1,7 +1,7 @@
 {:paths ["src" "resources"]
  :deps {org.clojure/clojure {:mvn/version "1.12.4"}
         org.clojure/data.json {:mvn/version "2.5.1"}
-        alpeware/clj-datachannel {:git/url "https://github.com/alpeware/clj-datachannel"
+        alpeware/clj-datachannel {:git/url "https://bitecho.org/git/clj-datachannel.git"
                                   :git/sha "1e4529875310311d1902094d25ad5ebb824665d1"}}
  :jvm-opts ["--enable-native-access=ALL-UNNAMED"
             "--add-exports=java.base/sun.security.tools.keytool=ALL-UNNAMED"
