@@ -401,7 +401,7 @@ publish_git_repos() {
 #
 # To verify signed git tags:
 #   1. Add this key to your allowed_signers file:
-#      echo "release@${DOMAIN} ${pubkey}" >> ~/.config/git/allowed_signers
+#      curl -sSL https://${DOMAIN}/keys.txt | grep -v '^#' >> ~/.config/git/allowed_signers
 #   2. Configure git:
 #      git config gpg.ssh.allowedSignersFile ~/.config/git/allowed_signers
 #   3. Verify tag:
@@ -424,6 +424,12 @@ KEYS_EOF
       return 1
     fi
 
+    # Unshallow if shallow clone to ensure complete dumb-HTTP bare repo
+    if [ "$(git -C "${src_repo}" rev-parse --is-shallow-repository)" = "true" ]; then
+      echo "  Unshallowing ${repo}..."
+      git -C "${src_repo}" fetch --unshallow
+    fi
+
     local def_branch
     def_branch="$(git -C "${src_repo}" symbolic-ref --short HEAD 2>/dev/null || git -C "${src_repo}" branch --show-current 2>/dev/null || echo "master")"
     if [[ -z "$def_branch" ]]; then def_branch="master"; fi
@@ -443,8 +449,11 @@ KEYS_EOF
       -c user.email="release@${DOMAIN}" \
       tag -s -f verified HEAD -m "Verified snapshot of ${repo} on ${DOMAIN}"
 
-    # Enable dumb HTTP git transport
+    # Pack objects, update dumb HTTP server info, and verify repository integrity
+    rm -rf "${bare_repo}/objects/info/commit-graphs" "${bare_repo}/objects/info/commit-graph"
+    git --git-dir="${bare_repo}" repack -a -d -q
     git --git-dir="${bare_repo}" update-server-info
+    git --git-dir="${bare_repo}" fsck --full > /dev/null
     if [[ -f "${bare_repo}/hooks/post-update.sample" ]]; then
       cp -f "${bare_repo}/hooks/post-update.sample" "${bare_repo}/hooks/post-update"
       chmod +x "${bare_repo}/hooks/post-update"
