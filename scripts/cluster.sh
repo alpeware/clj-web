@@ -359,10 +359,15 @@ EDN_EOF
 
 cmd_deploy() {
   local staging=false
+  local reset_certs=false
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --staging)
         staging=true
+        shift
+        ;;
+      --reset-certs)
+        reset_certs=true
         shift
         ;;
       *)
@@ -482,8 +487,16 @@ REMOTE_FP
 CFG_EOF
 
     rsync -az -e "ssh -o StrictHostKeyChecking=accept-new -i ${SSH_KEY}" \
-      "$tmp_cfg" "${SSH_USER}@${ip}:/etc/clj-web/config.edn"
+      "$tmp_cfg" "${SSH_USER}@${ip}:/etc/clj-web/config.edn.new"
     rm -f "$tmp_cfg"
+    ssh_cmd "$node" bash -s << REMOTE_CFG
+set -euo pipefail
+if [ "${reset_certs}" = "true" ] || { [ -f /etc/clj-web/config.edn ] && ! grep -Fq "${acme_dir}" /etc/clj-web/config.edn; }; then
+  echo "ACME environment changed or --reset-certs requested on ${node}; clearing cached certs and ACME account..."
+  rm -rf /var/lib/clj-web/certs/* /var/lib/clj-web/acme/*
+fi
+mv -f /etc/clj-web/config.edn.new /etc/clj-web/config.edn
+REMOTE_CFG
   done
 
   # 5. Sync static public/ directory
