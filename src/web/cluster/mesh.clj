@@ -185,13 +185,15 @@
                (when tls-manager
                  (try
                    (tls/update-tls-bundle! tls-manager (:cert-pem effect) (:key-pem effect))
+                   (println "[Cluster] Installed replicated TLS bundle from leader")
                    (catch Exception e
                      (binding [*out* *err*]
                        (println "Error updating TLS bundle:" (.getMessage e))))))
 
                :smtp/save-replicated-mail
                (try
-                 (smtp/save-eml! state-dir (:mail effect))
+                 (let [saved (smtp/save-eml! state-dir (:mail effect))]
+                   (println (str "[Cluster] Replicated email saved [" (.getName ^File (:file saved)) "] from " (:from saved) " to " (str/join ", " (:to saved)))))
                  (catch Exception e
                    (binding [*out* *err*]
                      (println "Error saving replicated mail:" (.getMessage e)))))

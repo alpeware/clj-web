@@ -293,6 +293,15 @@ sudo systemctl restart systemd-resolved || true
 sudo systemctl stop exim4 2>/dev/null || true
 sudo systemctl disable exim4 2>/dev/null || true
 
+# Log rotation (journald)
+sudo mkdir -p /etc/systemd/journald.conf.d
+cat << 'JOURNALD_CFG' | sudo tee /etc/systemd/journald.conf.d/size-limit.conf > /dev/null
+[Journal]
+SystemMaxUse=100M
+MaxFileSec=7day
+JOURNALD_CFG
+sudo systemctl restart systemd-journald || true
+
 # 5. App directories
 echo "Creating application directories..."
 sudo mkdir -p /opt/clj-web /etc/clj-web /var/lib/clj-web /var/www/clj-web/public
@@ -537,6 +546,15 @@ if [ ! -f /etc/systemd/resolved.conf.d/no-stub.conf ]; then
 fi
 sudo systemctl stop exim4 2>/dev/null || true
 sudo systemctl disable exim4 2>/dev/null || true
+
+# Log rotation (journald)
+sudo mkdir -p /etc/systemd/journald.conf.d
+cat << 'JOURNALD_CFG' | sudo tee /etc/systemd/journald.conf.d/size-limit.conf > /dev/null
+[Journal]
+SystemMaxUse=100M
+MaxFileSec=7day
+JOURNALD_CFG
+sudo systemctl restart systemd-journald || true
 sudo systemctl daemon-reload
 sudo systemctl enable clj-web
 sudo systemctl restart clj-web
@@ -568,44 +586,128 @@ REMOTE_START
 cmd_status() {
   local rtype="${1:-A}"
   echo "=== 3-Node Cluster Status (${DOMAIN}) ==="
-  printf "%-6s %-22s %-16s %-10s %-10s %-14s %-10s %-6s\n" \
-    "Node" "Project" "IP" "VM State" "Service" "Memory" "DNS (A)" "Emails"
-  printf "%-6s %-22s %-16s %-10s %-10s %-14s %-10s %-6s\n" \
-    "------" "----------------------" "----------------" "----------" "----------" "--------------" "----------" "------"
+  printf "%-6s %-16s %-10s %-14s %-16s %-16s %-26s %-8s %s\n" \
+    "Node" "IP" "State" "Memory" "Disk" "Egress(Mo/NIC)" "Cluster (Role/Nodes/HB)" "Emails" "DNS (${rtype})"
+  printf "%-6s %-16s %-10s %-14s %-16s %-16s %-26s %-8s %s\n" \
+    "------" "----------------" "----------" "--------------" "----------------" "----------------" "--------------------------" "--------" "----------"
 
   for node in "${NODES[@]}"; do
-    local proj ip vm_state svc_state mem_usage dns_check email_count
-    proj="$(get_project "$node")"
+    local ip vm_state state mem_usage disk_usage egress_mo_nic cluster_health email_count dns_check
     ip="$(get_ip "$node")"
     if [[ -z "$ip" ]]; then
       ip="UNRESOLVED"
-      vm_state="UNKNOWN"
-      svc_state="UNKNOWN"
+      state="UNKNOWN"
       mem_usage="N/A"
-      dns_check="N/A"
+      disk_usage="N/A"
+      egress_mo_nic="N/A"
+      cluster_health="N/A"
       email_count="0"
+      dns_check="N/A"
     else
+      local proj
+      proj="$(get_project "$node")"
       vm_state="$(gcloud compute instances describe "${INSTANCE[$node]}" --project="$proj" --zone="${ZONE[$node]}" --format='value(status)' 2>/dev/null || echo "UNKNOWN")"
       if [[ "$vm_state" == "RUNNING" ]]; then
-        svc_state="$(ssh_cmd "$node" "systemctl is-active clj-web 2>/dev/null || echo inactive" 2>/dev/null || echo "UNREACHABLE")"
-        mem_usage="$(ssh_cmd "$node" "free -m | awk '/Mem:/ {print \$3 \"/\" \$2 \"M\"}'" 2>/dev/null || echo "N/A")"
-        email_count="$(ssh_cmd "$node" "find /var/lib/clj-web/mail -type f -name '*.eml' 2>/dev/null | wc -l" 2>/dev/null || echo "0")"
-        if command -v dig >/dev/null 2>&1; then
-          dns_check="$(dig @"$ip" "${DOMAIN}" "$rtype" +short +time=2 +tries=1 2>/dev/null | tr '\n' ' ' | sed 's/ $//' || echo "FAILED")"
+        local raw_metrics
+        raw_metrics="$(ssh_cmd "$node" bash -s -- "${DOMAIN}" "${rtype}" << 'REMOTE_STATUS' 2>/dev/null || echo "SSH_FAILED"
+set -o pipefail
+domain="$1"
+rtype="$2"
+
+svc=$(systemctl is-active clj-web 2>/dev/null || echo "inactive")
+mem=$(free -m 2>/dev/null | awk '/Mem:/ {print $3 "/" $2 "M"}' || echo "N/A")
+disk=$(df -h / 2>/dev/null | awk 'NR==2 {print $3 "/" $2 " (" $5 ")"}' || echo "N/A")
+dev=$(ip -o -4 route show to default 2>/dev/null | awk '{print $5}' | head -n1)
+dev=${dev:-ens4}
+nic_raw=$(cat /sys/class/net/"$dev"/statistics/tx_bytes 2>/dev/null || echo 0)
+emails=$(find /var/lib/clj-web/mail -type f -name '*.eml' 2>/dev/null | wc -l || echo 0)
+statusz=$(curl -fsSL --max-time 2 http://127.0.0.1/statusz 2>/dev/null || true)
+dns_local=$(dig @127.0.0.1 "$domain" "$rtype" +short +time=2 +tries=1 2>/dev/null | tr '\n' ' ' | sed 's/ $//' || echo "FAILED")
+if [ -z "$dns_local" ]; then dns_local="NO_RECORDS"; fi
+
+echo "${svc}|${mem}|${disk}|${nic_raw}|${emails}|${statusz}|${dns_local}"
+REMOTE_STATUS
+)"
+        if [[ -z "$raw_metrics" || "$raw_metrics" == "SSH_FAILED" ]]; then
+          state="UNREACHABLE"
+          mem_usage="N/A"
+          disk_usage="N/A"
+          egress_mo_nic="N/A"
+          cluster_health="N/A"
+          email_count="0"
+          dns_check="N/A"
         else
-          dns_check="$(ssh_cmd "$node" "dig @127.0.0.1 '${DOMAIN}' '$rtype' +short +time=2 +tries=1 2>/dev/null" 2>/dev/null | tr '\n' ' ' | sed 's/ $//' || echo "FAILED")"
+          local raw_svc raw_mem raw_disk raw_nic raw_emails raw_statusz raw_dns
+          IFS='|' read -r raw_svc raw_mem raw_disk raw_nic raw_emails raw_statusz raw_dns <<< "$raw_metrics"
+          state="${raw_svc:-inactive}"
+          mem_usage="${raw_mem:-N/A}"
+          disk_usage="${raw_disk:-N/A}"
+          email_count="${raw_emails:-0}"
+
+          # Parse statusz
+          local role="" leader="" quorum="" hb_ms="" egress_bytes=""
+          for kv in $raw_statusz; do
+            case "$kv" in
+              role=*) role="${kv#role=}" ;;
+              leader=*) leader="${kv#leader=}" ;;
+              quorum=*) quorum="${kv#quorum=}" ;;
+              hb_ms=*) hb_ms="${kv#hb_ms=}" ;;
+              egress_bytes=*) egress_bytes="${kv#egress_bytes=}" ;;
+            esac
+          done
+
+          # Cluster health
+          if [[ -n "$role" ]]; then
+            local hb_sec
+            hb_sec="$(awk -v ms="${hb_ms:-0}" 'BEGIN {printf "%.1fs", ms/1000}')"
+            if [[ "$role" == "leader" ]]; then
+              cluster_health="leader ${quorum} (${hb_sec})"
+            elif [[ "$role" == "follower" ]]; then
+              cluster_health="follower->${leader} ${quorum} (${hb_sec})"
+            else
+              cluster_health="${role} ${quorum} (${hb_sec})"
+            fi
+          else
+            if [[ "$state" == "active" ]]; then
+              cluster_health="standalone"
+            else
+              cluster_health="down"
+            fi
+          fi
+
+          # Egress (Mo/NIC)
+          egress_mo_nic="$(awk -v mo="${egress_bytes:-0}" -v nic="${raw_nic:-0}" '
+function human(b) {
+  if (b >= 1073741824) return sprintf("%.1fG", b/1073741824);
+  if (b >= 1048576) return sprintf("%.1fM", b/1048576);
+  if (b >= 1024) return sprintf("%.1fK", b/1024);
+  return sprintf("%dB", b);
+}
+BEGIN {
+  printf "%s/%s", human(mo), human(nic);
+}')"
+
+          # DNS check
+          if command -v dig >/dev/null 2>&1; then
+            dns_check="$(dig @"$ip" "${DOMAIN}" "$rtype" +short +time=2 +tries=1 2>/dev/null | tr '\n' ' ' | sed 's/ $//' || echo "FAILED")"
+            if [[ -z "$dns_check" ]]; then dns_check="NO_RECORDS"; fi
+          else
+            dns_check="${raw_dns:-NO_RECORDS}"
+          fi
         fi
-        if [[ -z "$dns_check" ]]; then dns_check="NO_RECORDS"; fi
       else
-        svc_state="STOPPED"
+        state="${vm_state}"
         mem_usage="N/A"
+        disk_usage="N/A"
+        egress_mo_nic="N/A"
+        cluster_health="N/A"
         email_count="0"
         dns_check="N/A"
       fi
     fi
 
-    printf "%-6s %-22s %-16s %-10s %-10s %-14s %-10s %-6s\n" \
-      "$node" "$proj" "$ip" "$vm_state" "$svc_state" "$mem_usage" "$dns_check" "$email_count"
+    printf "%-6s %-16s %-10s %-14s %-16s %-16s %-26s %-8s %s\n" \
+      "$node" "$ip" "$state" "$mem_usage" "$disk_usage" "$egress_mo_nic" "$cluster_health" "$email_count" "$dns_check"
   done
 }
 
@@ -613,7 +715,7 @@ cmd_logs() {
   local target="${1:-}"
   if [[ -n "$target" ]]; then
     echo "=== Streaming logs for ${target} ==="
-    ssh -o StrictHostKeyChecking=accept-new -i "${SSH_KEY}" -t "${SSH_USER}@$(get_ip "$target")" "sudo journalctl -u clj-web -f"
+    ssh -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR -i "${SSH_KEY}" -t "${SSH_USER}@$(get_ip "$target")" "sudo journalctl -u clj-web -f"
   else
     for node in "${NODES[@]}"; do
       echo ""

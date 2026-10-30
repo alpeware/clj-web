@@ -144,8 +144,33 @@
 ;; Handlers: Port 80 (HTTP) & Port 443 (HTTPS)
 ;; ---------------------------------------------------------------------------
 
+(defn- render-statusz
+  [limiter-atom cluster-state-atom now-ms]
+  (let [sdf (SimpleDateFormat. "yyyy-MM")
+        month-key (.format sdf (Date. (long now-ms)))
+        egress-bytes (long (if (and limiter-atom (instance? clojure.lang.IDeref limiter-atom))
+                             (get-in @limiter-atom [:egress-by-month month-key] 0)
+                             0))
+        st (when (and cluster-state-atom (instance? clojure.lang.IDeref cluster-state-atom))
+             @cluster-state-atom)
+        role (:role st)
+        leader-id (:leader-id st)
+        healthy-count (if st (count (:healthy-nodes st)) 1)
+        total-count (if st (count (:all-nodes st)) 1)
+        peers (when st (filter :last-seen-ms (vals (:peers st))))
+        max-hb-age-ms (if (seq peers)
+                        (reduce max 0 (map (fn [p] (max 0 (- (long now-ms) (long (:last-seen-ms p))))) peers))
+                        0)]
+    (format "role=%s leader=%s quorum=%d/%d hb_ms=%d egress_bytes=%d\n"
+            (name (or role :standalone))
+            (name (or leader-id :none))
+            healthy-count
+            total-count
+            max-hb-age-ms
+            egress-bytes)))
+
 (defn- make-http-port-80-handler
-  [_config acme-challenges-atom https-port]
+  [_config acme-challenges-atom https-port limiter-atom cluster-state-atom]
   (reify HttpHandler
     (handle [_ exchange]
       (let [req (exchange->request exchange)
@@ -160,6 +185,7 @@
                              @acme-challenges-atom
                              acme-challenges-atom)
                 key-auth (get challenges token)]
+            (println (str "[HTTP] ACME challenge " (name method) " " path " -> " (if key-auth 200 404) " [" (:request/remote-ip req) "]"))
             (if key-auth
               (send-response exchange
                              {:response/status 200
@@ -178,7 +204,16 @@
                           :response/headers {"Content-Type" "text/plain; charset=utf-8"}
                           :response/body (if (= method :HEAD) nil "ok\n")})
 
-          ;; 3. 308 Permanent Redirect to HTTPS
+          ;; 3. Status check
+          (and (or (= method :GET) (= method :HEAD))
+               (= path "/statusz"))
+          (let [body (render-statusz limiter-atom cluster-state-atom (System/currentTimeMillis))]
+            (send-response exchange
+                           {:response/status 200
+                            :response/headers {"Content-Type" "text/plain; charset=utf-8"}
+                            :response/body (if (= method :HEAD) nil body)}))
+
+          ;; 4. 308 Permanent Redirect to HTTPS
           :else
           (let [host (get-in req [:request/uri :host] "localhost")
                 port-suffix (if (and https-port (not= https-port 443)) (str ":" https-port) "")
@@ -192,7 +227,7 @@
                             :response/body nil})))))))
 
 (defn- make-https-port-443-handler
-  [config cache-atom limiter-atom]
+  [config cache-atom limiter-atom cluster-state-atom]
   (reify HttpHandler
     (handle [_ exchange]
       (let [req (exchange->request exchange)
@@ -209,6 +244,15 @@
                          {:response/status 200
                           :response/headers {"Content-Type" "text/plain; charset=utf-8"}
                           :response/body (if (= method :HEAD) nil "ok\n")})
+
+          ;; Status check (bypasses rate limit)
+          (and (or (= method :GET) (= method :HEAD))
+               (= path "/statusz"))
+          (let [body (render-statusz limiter-atom cluster-state-atom now-ms)]
+            (send-response exchange
+                           {:response/status 200
+                            :response/headers {"Content-Type" "text/plain; charset=utf-8"}
+                            :response/body (if (= method :HEAD) nil body)}))
 
           :else
           ;; Rate limit check
@@ -238,6 +282,7 @@
                                (map? body) (or (:length body) 0)
                                (instance? File body) (.length ^File body)
                                :else 0)]
+                (println (str "[HTTPS] " (name method) " " path " -> " (:response/status hsts-resp) " (" body-len "B) [" remote-ip "]"))
                 ;; Record egress bytes and check monthly egress limit
                 (if (pos? body-len)
                   (let [sdf (SimpleDateFormat. "yyyy-MM")
@@ -264,45 +309,47 @@
   "Starts JDK 25 virtual-thread HttpServer (port 80) and HttpsServer (port 443).
    Returns a map with :http-server, :https-server, :http-port, :https-port,
    :cache-atom, :limiter-atom, and :stop-fn."
-  [config tls-manager acme-challenges-atom]
-  (let [bind-ip (get-in config [:http :bind-ip] "0.0.0.0")
-        http-port (int (get-in config [:http :http-port] 80))
-        https-port (int (get-in config [:http :https-port] 443))
-        vthread-executor (Executors/newVirtualThreadPerTaskExecutor)
-        cache-atom (atom (content/init-content-cache
-                          {:max-bytes (get-in config [:http :cache-max-bytes] 134217728)
-                           :max-file-bytes (get-in config [:http :cache-max-file-bytes] 2097152)}))
-        limiter-atom (atom (rl/init-limiter
-                            {:capacity 100.0
-                             :refill-per-sec 20.0
-                             :monthly-egress-limit-bytes (get-in config [:http :monthly-egress-limit-bytes] 900000000)}))
+  ([config tls-manager acme-challenges-atom]
+   (start-http-servers! config tls-manager acme-challenges-atom nil))
+  ([config tls-manager acme-challenges-atom cluster-state-atom]
+   (let [bind-ip (get-in config [:http :bind-ip] "0.0.0.0")
+         http-port (int (get-in config [:http :http-port] 80))
+         https-port (int (get-in config [:http :https-port] 443))
+         vthread-executor (Executors/newVirtualThreadPerTaskExecutor)
+         cache-atom (atom (content/init-content-cache
+                           {:max-bytes (get-in config [:http :cache-max-bytes] 134217728)
+                            :max-file-bytes (get-in config [:http :cache-max-file-bytes] 2097152)}))
+         limiter-atom (atom (rl/init-limiter
+                             {:capacity 100.0
+                              :refill-per-sec 20.0
+                              :monthly-egress-limit-bytes (get-in config [:http :monthly-egress-limit-bytes] 900000000)}))
 
-        ;; 1. Start HTTPS server first so port 80 can redirect to HTTPS port if ephemeral
-        https-server (HttpsServer/create (InetSocketAddress. ^String bind-ip https-port) 0)
-        _ (.setHttpsConfigurator https-server (tls/make-https-configurator (:ssl-context-atom tls-manager)))
-        _ (.setExecutor https-server vthread-executor)
-        _ (.createContext https-server "/" (make-https-port-443-handler config cache-atom limiter-atom))
-        _ (.start https-server)
-        bound-https-port (.getPort (.getAddress https-server))
+         ;; 1. Start HTTPS server first so port 80 can redirect to HTTPS port if ephemeral
+         https-server (HttpsServer/create (InetSocketAddress. ^String bind-ip https-port) 0)
+         _ (.setHttpsConfigurator https-server (tls/make-https-configurator (:ssl-context-atom tls-manager)))
+         _ (.setExecutor https-server vthread-executor)
+         _ (.createContext https-server "/" (make-https-port-443-handler config cache-atom limiter-atom cluster-state-atom))
+         _ (.start https-server)
+         bound-https-port (.getPort (.getAddress https-server))
 
-        ;; 2. Start HTTP server (port 80 / ephemeral)
-        http-server (HttpServer/create (InetSocketAddress. ^String bind-ip http-port) 0)
-        _ (.setExecutor http-server vthread-executor)
-        _ (.createContext http-server "/" (make-http-port-80-handler config acme-challenges-atom bound-https-port))
-        _ (.start http-server)
-        bound-http-port (.getPort (.getAddress http-server))
+         ;; 2. Start HTTP server (port 80 / ephemeral)
+         http-server (HttpServer/create (InetSocketAddress. ^String bind-ip http-port) 0)
+         _ (.setExecutor http-server vthread-executor)
+         _ (.createContext http-server "/" (make-http-port-80-handler config acme-challenges-atom bound-https-port limiter-atom cluster-state-atom))
+         _ (.start http-server)
+         bound-http-port (.getPort (.getAddress http-server))
 
-        stop-fn (fn []
-                  (try (.stop http-server 0) (catch Exception _ nil))
-                  (try (.stop https-server 0) (catch Exception _ nil))
-                  (try (.shutdownNow vthread-executor) (catch Exception _ nil)))]
-    {:http-server http-server
-     :https-server https-server
-     :http-port bound-http-port
-     :https-port bound-https-port
-     :cache-atom cache-atom
-     :limiter-atom limiter-atom
-     :stop-fn stop-fn}))
+         stop-fn (fn []
+                   (try (.stop http-server 0) (catch Exception _ nil))
+                   (try (.stop https-server 0) (catch Exception _ nil))
+                   (try (.shutdownNow vthread-executor) (catch Exception _ nil)))]
+     {:http-server http-server
+      :https-server https-server
+      :http-port bound-http-port
+      :https-port bound-https-port
+      :cache-atom cache-atom
+      :limiter-atom limiter-atom
+      :stop-fn stop-fn})))
 
 (defn stop-http-servers!
   "Stops HTTP and HTTPS servers cleanly."

@@ -131,6 +131,7 @@
         allowed (get smtp-cfg :allowed-recipients #{})
         remote-addr (.getInetAddress initial-socket)
         remote-ip (if remote-addr (.getHostAddress remote-addr) "127.0.0.1")
+        _ (println (str "[SMTP] Session started from " remote-ip))
         init-in (BufferedReader. (InputStreamReader. (.getInputStream initial-socket) StandardCharsets/UTF_8))
         init-out (BufferedWriter. (OutputStreamWriter. (.getOutputStream initial-socket) StandardCharsets/UTF_8))
         init-st (let [s (session/init-session {:domain domain
@@ -178,6 +179,7 @@
                                  :received-at (System/currentTimeMillis)
                                  :domain domain}
                       saved (save-eml! state-dir mail-info)]
+                  (println (str "[SMTP] Received email [" (.getName ^File (:file saved)) "] from " (:from saved) " to " (str/join ", " (:to saved)) " (" (count (:raw-eml saved)) " bytes) via " remote-ip))
                   (when-let [on-recv (:on-mail-received opts)]
                     (try (on-recv saved) (catch Exception _ nil)))))
 
@@ -199,6 +201,7 @@
                   (.setEnabledProtocols ssl-socket (into-array String ["TLSv1.3" "TLSv1.2"]))
                   (.setSoTimeout ssl-socket sock-timeout)
                   (.startHandshake ssl-socket)
+                  (println (str "[SMTP] STARTTLS upgrade completed for " remote-ip))
                   (let [new-in (BufferedReader. (InputStreamReader. (.getInputStream ssl-socket) StandardCharsets/UTF_8))
                         new-out (BufferedWriter. (OutputStreamWriter. (.getOutputStream ssl-socket) StandardCharsets/UTF_8))]
                     (recur ssl-socket new-in new-out new-state)))

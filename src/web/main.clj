@@ -39,7 +39,7 @@
                        (smtp/start-smtp-server! cfg tls-manager
                                                 (merge {:on-mail-received (fn [mail] (mesh/replicate-mail! cluster-mgr mail))}
                                                        (:smtp-opts opts {}))))
-         http-servers (http/start-http-servers! cfg tls-manager acme-challenges-atom)
+         http-servers (http/start-http-servers! cfg tls-manager acme-challenges-atom (:state-atom cluster-mgr))
          acme-mgr (when (get-in cfg [:acme :enabled?] true)
                     (acme/start-acme-loop! cfg cluster-mgr tls-manager (:acme-opts opts {})))
          node-map {:config cfg
