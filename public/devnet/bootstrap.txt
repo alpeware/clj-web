@@ -1,0 +1,41 @@
+================================================================================
+Bitecho Genesis Devnet - Bootstrap Peer & WebRTC Connection Descriptor
+Generated: 2026-10-31T22:26:54Z
+================================================================================
+
+Network: devnet (3-node Streamlet BFT validator quorum, N=3, quorum=2 of 3)
+Treasury Public Key: 302a300506032b65700321007c2b695b77904a19a630b75ce53889a53963c0f85aa69e5276bb988a183b91b8
+Custody Public Key:  302a300506032b6570032100e476d77ef34962d09baee0062b4c03be832a1ccc2d691623a8cb39e356793f2b
+
+Bootstrap Validators:
+--------------------------------------------------------------------------------
+Node: node1 (us-west1)
+  Cluster Address:   35.212.129.138:5000 (UDP DataChannel)
+  Agent Ingress:     35.212.129.138:5010 (UDP DataChannel)
+  HTTP Diagnostics:  http://127.0.0.1:8080/healthz, /statusz (bound to localhost)
+  Ed25519 Pubkey:    302a300506032b6570032100d869c1cc916523907f9c4a44b6c9963daf430a08d9d15567b017b6599f87e086
+  DTLS Fingerprint:  95:09:40:3B:04:A0:B3:F5:88:26:51:CE:C9:A9:8E:0C:A1:15:92:8F:D5:7D:4A:11:A2:6C:3C:B0:0B:AB:0C:3B
+  ICE Credentials:   ufrag=188691cd pwd=00283a76339aefdfd4c26112
+
+Node: node2 (us-central1)
+  Cluster Address:   35.206.120.143:5000 (UDP DataChannel)
+  Agent Ingress:     35.206.120.143:5010 (UDP DataChannel)
+  HTTP Diagnostics:  http://127.0.0.1:8080/healthz, /statusz (bound to localhost)
+  Ed25519 Pubkey:    302a300506032b6570032100592ab794dea07da278ef3853e8cc2d2f6ac5e3417eac80d93ab01e1fc61653ba
+  DTLS Fingerprint:  F8:73:94:91:1D:7B:CA:66:D9:67:9E:4B:72:B0:D0:8D:5F:5C:37:0F:FE:04:2E:ED:86:E6:8D:79:B8:07:43:78
+  ICE Credentials:   ufrag=2f6743ca pwd=bdf9004fca3ad971789d26f0
+
+Node: node3 (us-east1)
+  Cluster Address:   35.211.71.139:5000 (UDP DataChannel)
+  Agent Ingress:     35.211.71.139:5010 (UDP DataChannel)
+  HTTP Diagnostics:  http://127.0.0.1:8080/healthz, /statusz (bound to localhost)
+  Ed25519 Pubkey:    302a300506032b65700321007b7f58652a2c26b4180aeee45ff12f927a45d92e00fc3462c5d854f6203351f1
+  DTLS Fingerprint:  38:2B:18:4B:23:E8:F4:32:D7:08:5A:2A:A4:45:4F:EE:12:D4:51:B1:9B:2D:66:7C:2E:E1:2A:3E:7C:B3:60:40
+  ICE Credentials:   ufrag=bd892b82 pwd=6cc71f7ab39c215c9ec262f9
+
+Connection Instructions for Agents / Light Nodes:
+Agent Ingress (UDP port 5010) is enabled on Devnet (:listen-agents? true).
+Agents connect over WebRTC DataChannel (UDP port 5010) with channel name
+"bitecho", authenticating via the validator's SHA-256 DTLS fingerprint and
+ICE credentials above. All inbound agent events MUST be wrapped in an
+Ed25519-signed envelope via wrap-agent-event.
