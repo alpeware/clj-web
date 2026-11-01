@@ -4,11 +4,16 @@
    static content delivery over HTTPS, rate limiting, and zero-downtime TLS hot-swap."
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]
+            [clojure.test.check.clojure-test :refer [defspec]]
+            [clojure.test.check.generators :as gen]
+            [clojure.test.check.properties :as prop]
             [web.http.server :as server]
             [web.tls.context :as tls])
   (:import [java.io File]
-           [java.net ServerSocket URI]
+           [java.net ServerSocket Socket URI]
            [java.net.http HttpClient HttpRequest HttpResponse$BodyHandlers]
+           [java.nio ByteBuffer]
+           [java.nio.charset StandardCharsets]
            [java.nio.file Files]
            [java.security SecureRandom]
            [java.security.cert X509Certificate]
@@ -282,3 +287,178 @@
 
           (finally
             (server/stop-http-servers! servers)))))))
+
+;; ---------------------------------------------------------------------------
+;; TCP Passthrough Multiplexer & Ingress Classification Tests
+;; ---------------------------------------------------------------------------
+
+(defn- make-mock-client-hello
+  "Builds a valid raw TLS 1.2 ClientHello byte array with the given SNI hostname."
+  [^String sni-string]
+  (let [sni-bytes (when sni-string (.getBytes sni-string StandardCharsets/UTF_8))
+        sni-len (if sni-bytes (alength sni-bytes) 0)
+        ext-data-len (+ 5 sni-len)
+        ext-len (+ 4 ext-data-len)
+        exts-block (if sni-string
+                     (let [bb (ByteBuffer/allocate (+ 2 ext-len))]
+                       (.putShort bb (short ext-len))
+                       (.putShort bb (short 0)) ;; SNI ext type 0x0000
+                       (.putShort bb (short ext-data-len))
+                       (.putShort bb (short (+ 3 sni-len)))
+                       (.put bb (byte 0)) ;; host_name type 0
+                       (.putShort bb (short sni-len))
+                       (.put bb sni-bytes)
+                       (.array bb))
+                     (byte-array [(byte 0) (byte 0)]))
+        handshake-body-len (+ 2 32 1 0 2 2 1 1 (alength exts-block))
+        handshake-len (+ 4 handshake-body-len)
+        bb (ByteBuffer/allocate (+ 5 handshake-len))]
+    (.put bb (byte 0x16))          ;; ContentType: Handshake
+    (.putShort bb (short 0x0303))  ;; Version: TLS 1.2
+    (.putShort bb (short handshake-len))
+    (.put bb (byte 0x01))          ;; HandshakeType: ClientHello
+    (.put bb (byte 0x00))          ;; Handshake length 24-bit
+    (.putShort bb (short handshake-body-len))
+    (.putShort bb (short 0x0303))  ;; Client Version
+    (.put bb (byte-array 32))      ;; Random
+    (.put bb (byte 0))             ;; Session ID length
+    (.putShort bb (short 2))       ;; Cipher suites length
+    (.putShort bb (short 0x1301))  ;; Cipher suite: TLS_AES_128_GCM_SHA256
+    (.put bb (byte 1))             ;; Compression methods length
+    (.put bb (byte 0))             ;; null compression
+    (.put bb exts-block)
+    (.array bb)))
+
+(deftest test-extract-tls-sni-unit
+  (testing "extracts SNI hostname from ClientHello"
+    (let [pkt (make-mock-client-hello "node1.ingress.bitecho.org")]
+      (is (= "node1.ingress.bitecho.org" (server/extract-tls-sni pkt (alength pkt))))))
+
+  (testing "returns nil for non-TLS or malformed packets"
+    (is (nil? (server/extract-tls-sni (byte-array 10) 10)))
+    (is (nil? (server/extract-tls-sni (byte-array [(byte 0x16) (byte 0x03) (byte 0x01)]) 3)))
+    (is (nil? (server/extract-tls-sni nil 0)))))
+
+(deftest test-ingress-stream-classification-unit
+  (let [domain "bitecho.org"]
+    (testing "RFC 4571 DTLS is classified as ingress"
+      (let [pkt (byte-array [(byte 0) (byte 12) (byte 0x16) (unchecked-byte 0xFE) (unchecked-byte 0xFD) 0 0 0 0 0 0 0])]
+        (is (true? (server/ingress-stream? pkt (alength pkt) domain)))))
+
+    (testing "RFC 4571 STUN is classified as ingress"
+      (let [pkt (byte-array [(byte 0) (byte 20) (byte 0x00) (byte 0x01) 0 0 (byte 0x21) (byte 0x12) (unchecked-byte 0xA4) (byte 0x42)])]
+        (is (true? (server/ingress-stream? pkt (alength pkt) domain)))))
+
+    (testing "SNI node1.ingress.bitecho.org is ingress"
+      (let [pkt (make-mock-client-hello "node1.ingress.bitecho.org")]
+        (is (true? (server/ingress-stream? pkt (alength pkt) domain)))))
+
+    (testing "SNI ingress.bitecho.org is ingress"
+      (let [pkt (make-mock-client-hello "ingress.bitecho.org")]
+        (is (true? (server/ingress-stream? pkt (alength pkt) domain)))))
+
+    (testing "SNI bitecho.org or www.bitecho.org is NOT ingress"
+      (let [pkt1 (make-mock-client-hello "bitecho.org")
+            pkt2 (make-mock-client-hello "www.bitecho.org")]
+        (is (false? (server/ingress-stream? pkt1 (alength pkt1) domain)))
+        (is (false? (server/ingress-stream? pkt2 (alength pkt2) domain)))))
+
+    (testing "Plain HTTP request is NOT ingress"
+      (let [pkt (.getBytes "GET /healthz HTTP/1.1\r\n\r\n" StandardCharsets/UTF_8)]
+        (is (false? (server/ingress-stream? pkt (alength pkt) domain)))))))
+
+(defspec prop-extract-tls-sni-roundtrip
+  100
+  (prop/for-all [sub (gen/not-empty (gen/fmap #(apply str %) (gen/vector (gen/elements "abcdefghijklmnopqrstuvwxyz0123456789-") 3 20)))
+                 domain (gen/elements ["example.com" "bitecho.org" "test.net"])]
+                (let [host (str sub "." domain)
+                      buf (make-mock-client-hello host)
+                      extracted (server/extract-tls-sni buf (alength buf))]
+                  (= host extracted))))
+
+(defspec prop-extract-tls-sni-fuzz
+  100
+  (prop/for-all [bs (gen/fmap byte-array (gen/vector (gen/choose -128 127) 0 300))]
+                (let [res (server/extract-tls-sni bs (alength ^bytes bs))]
+                  (or (nil? res) (string? res)))))
+
+(defspec prop-ingress-stream-classification
+  100
+  (prop/for-all [node-id (gen/choose 1 9)
+                 domain (gen/elements ["bitecho.org" "example.com"])
+                 other-sub (gen/elements ["www" "docs" "mvn" "api" "blog"])]
+                (let [dtls-pkt (byte-array [(byte 0) (byte 10) (byte 0x16) (unchecked-byte 0xFE) (unchecked-byte 0xFD) 0 0 0 0 0])
+                      stun-pkt (byte-array [(byte 0) (byte 20) (byte 0x00) (byte 0x01) 0 0 (byte 0x21) (byte 0x12) (unchecked-byte 0xA4) (byte 0x42)])
+                      ingress-sni (str "node" node-id ".ingress." domain)
+                      ingress-tls (make-mock-client-hello ingress-sni)
+                      bare-ingress-tls (make-mock-client-hello (str "ingress." domain))
+                      other-tls (make-mock-client-hello (str other-sub "." domain))
+                      plain-http (.getBytes "GET / HTTP/1.1\r\nHost: test\r\n\r\n" StandardCharsets/UTF_8)]
+                  (and (true? (server/ingress-stream? dtls-pkt (alength dtls-pkt) domain))
+                       (true? (server/ingress-stream? stun-pkt (alength stun-pkt) domain))
+                       (true? (server/ingress-stream? ingress-tls (alength ingress-tls) domain))
+                       (true? (server/ingress-stream? bare-ingress-tls (alength bare-ingress-tls) domain))
+                       (false? (server/ingress-stream? other-tls (alength other-tls) domain))
+                       (false? (server/ingress-stream? plain-http (alength plain-http) domain))))))
+
+(deftest test-port-443-tcp-passthrough-multiplexer
+  (with-temp-env
+    (fn [^File state-dir ^File content-dir]
+      (let [http-port (find-free-port)
+            https-port (find-free-port)
+            mock-ingress-port (find-free-port)
+            received-payload-promise (promise)
+            mock-backend-server (ServerSocket. mock-ingress-port)]
+        (try
+          ;; Mock ingress backend thread
+          (.start (Thread/ofVirtual)
+                  (reify Runnable
+                    (run [_]
+                      (try
+                        (with-open [client (.accept mock-backend-server)]
+                          (let [in (.getInputStream client)
+                                out (.getOutputStream client)
+                                buf (byte-array 1024)
+                                n (.read in buf 0 1024)]
+                            (deliver received-payload-promise (when (pos? n) (java.util.Arrays/copyOf buf (int n))))
+                            (.write out (.getBytes "MOCK-ACK\n" StandardCharsets/UTF_8))
+                            (.flush out)))
+                        (catch Exception _ nil)))))
+
+          (let [cfg {:state-dir (.getAbsolutePath state-dir)
+                     :domain "passthrough.bitecho.org"
+                     :http {:bind-ip "127.0.0.1"
+                            :http-port http-port
+                            :https-port https-port
+                            :content-root (.getAbsolutePath content-dir)
+                            :ingress-target {:host "127.0.0.1" :port mock-ingress-port}}}
+                tls-mgr (tls/init-tls-manager! cfg)
+                acme-atom (atom {})
+                servers (server/start-http-servers! cfg tls-mgr acme-atom)
+                client (make-http-client)]
+            (try
+              (testing "RFC 4571 DTLS packet is routed to ingress-target backend"
+                (with-open [s (Socket. "127.0.0.1" (int (:https-port servers)))]
+                  (let [out (.getOutputStream s)
+                        in (.getInputStream s)
+                        dtls-pkt (byte-array [(byte 0) (byte 12) (byte 0x16) (unchecked-byte 0xFE) (unchecked-byte 0xFD) 1 2 3 4 5 6 7])]
+                    (.write out dtls-pkt)
+                    (.flush out)
+                    (let [received (deref received-payload-promise 5000 :timeout)]
+                      (is (not= :timeout received))
+                      (is (java.util.Arrays/equals ^bytes dtls-pkt ^bytes received)))
+                    (let [resp-buf (byte-array 1024)
+                          rn (.read in resp-buf 0 1024)]
+                      (is (= "MOCK-ACK\n" (String. resp-buf 0 rn StandardCharsets/UTF_8)))))))
+
+              (testing "Standard HTTPS request to same port 443 is routed to internal HttpsServer"
+                (let [uri (URI/create (str "https://127.0.0.1:" (:https-port servers) "/healthz"))
+                      req (-> (HttpRequest/newBuilder uri) (.GET) (.build))
+                      resp (.send client req (HttpResponse$BodyHandlers/ofString))]
+                  (is (= 200 (.statusCode resp)))
+                  (is (= "ok\n" (.body resp)))))
+
+              (finally
+                (server/stop-http-servers! servers))))
+          (finally
+            (try (.close mock-backend-server) (catch Exception _ nil))))))))

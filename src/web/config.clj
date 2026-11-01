@@ -18,7 +18,7 @@
          :port 53
          :ttl-seconds 60
          :ns-ttl-seconds 3600
-         :subdomains #{"@" "www" "docs" "mvn"}
+         :subdomains #{"@" "www" "docs" "mvn" "ingress" "node1.ingress" "node2.ingress" "node3.ingress"}
          :caa-records [{:flags 0 :tag "issue" :value "letsencrypt.org"}]}
    :smtp {:enabled? true
           :bind-ip "0.0.0.0"
@@ -266,16 +266,25 @@
               dir-listing? (get http-cfg :directory-listing? (get-in default-config [:http :directory-listing?]))
               egress-limit (get http-cfg :monthly-egress-limit-bytes (get-in default-config [:http :monthly-egress-limit-bytes]))
               _ (validate-pos-int! :http/monthly-egress-limit-bytes egress-limit)
-              http (merge (:http default-config)
-                          http-cfg
-                          {:bind-ip http-bind-ip
-                           :http-port http-port
-                           :https-port https-port
-                           :content-root content-root
-                           :cache-max-bytes cache-max-bytes
-                           :cache-max-file-bytes cache-max-file
-                           :directory-listing? (boolean dir-listing?)
-                           :monthly-egress-limit-bytes egress-limit})]
+              ingress-target (get http-cfg :ingress-target)
+              _ (when (some? ingress-target)
+                  (when-not (and (map? ingress-target)
+                                 (string? (:host ingress-target))
+                                 (not (str/blank? (:host ingress-target)))
+                                 (valid-port? (:port ingress-target)))
+                    (throw (ex-info ":http :ingress-target must be a map with non-blank string :host and valid :port (1..65535)"
+                                    {:ingress-target ingress-target}))))
+              http (cond-> (merge (:http default-config)
+                                  http-cfg
+                                  {:bind-ip http-bind-ip
+                                   :http-port http-port
+                                   :https-port https-port
+                                   :content-root content-root
+                                   :cache-max-bytes cache-max-bytes
+                                   :cache-max-file-bytes cache-max-file
+                                   :directory-listing? (boolean dir-listing?)
+                                   :monthly-egress-limit-bytes egress-limit})
+                     ingress-target (assoc :ingress-target ingress-target))]
           (assoc raw-cfg
                  :node/id node-id
                  :domain domain

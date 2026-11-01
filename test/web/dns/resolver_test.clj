@@ -16,7 +16,7 @@
                       :ns3 {:ip4 "34.10.10.3" :ip6 nil}}}
     :dns {:ttl-seconds 60
           :ns-ttl-seconds 3600
-          :subdomains #{"@" "www" "docs" "mvn"}
+          :subdomains #{"@" "www" "docs" "mvn" "ingress" "node1.ingress" "node2.ingress" "node3.ingress"}
           :txt-records {"@" ["v=spf1 -all"]
                         "_dmarc" ["v=DMARC1; p=reject; rua=mailto:postmaster@example.com"]}}}))
 
@@ -166,11 +166,65 @@
       (is (= :A (:type (first (:answers resp)))))
       (is (= "34.10.10.1" (:rdata (first (:answers resp))))))))
 
-;; Property test
+(deftest test-ingress-subdomain-resolution
+  (testing "ingress.example.com resolves multi-A across healthy cluster nodes"
+    (let [cluster-st {:healthy-nodes #{:ns1 :ns2}}
+          q {:id 501 :qr? false :questions [{:qname "ingress.example.com" :qtype :A :qclass :IN}]}
+          resp (resolver/resolve-query test-config cluster-st q)
+          ans-ips (set (map :rdata (:answers resp)))]
+      (is (= :noerror (:rcode resp)))
+      (is (= #{"34.10.10.1" "34.10.10.2"} ans-ips))
+      (is (= 60 (:ttl (first (:answers resp)))))))
+
+  (testing "node1.ingress, node2.ingress, node3.ingress map deterministically to ns1, ns2, ns3"
+    (let [q1 {:id 502 :qr? false :questions [{:qname "node1.ingress.example.com" :qtype :A :qclass :IN}]}
+          r1 (resolver/resolve-query test-config {} q1)
+          ans1 (first (:answers r1))
+          q2 {:id 503 :qr? false :questions [{:qname "node2.ingress.example.com" :qtype :A :qclass :IN}]}
+          r2 (resolver/resolve-query test-config {} q2)
+          ans2 (first (:answers r2))
+          q3 {:id 504 :qr? false :questions [{:qname "node3.ingress.example.com" :qtype :A :qclass :IN}]}
+          r3 (resolver/resolve-query test-config {} q3)
+          ans3 (first (:answers r3))]
+      (is (= :noerror (:rcode r1)))
+      (is (= "34.10.10.1" (:rdata ans1)))
+      (is (= 60 (:ttl ans1)))
+
+      (is (= :noerror (:rcode r2)))
+      (is (= "34.10.10.2" (:rdata ans2)))
+      (is (= 60 (:ttl ans2)))
+
+      (is (= :noerror (:rcode r3)))
+      (is (= "34.10.10.3" (:rdata ans3)))
+      (is (= 60 (:ttl ans3))))
+
+    (testing "node1.ingress AAAA resolves IPv6"
+      (let [q {:id 505 :qr? false :questions [{:qname "node1.ingress.example.com" :qtype :AAAA :qclass :IN}]}
+            r (resolver/resolve-query test-config {} q)
+            ans (first (:answers r))]
+        (is (= :noerror (:rcode r)))
+        (is (= "2001:db8::1" (:rdata ans)))
+        (is (= 60 (:ttl ans)))))
+
+    (testing "node3.ingress AAAA with nil IPv6 returns SOA in authority"
+      (let [q {:id 506 :qr? false :questions [{:qname "node3.ingress.example.com" :qtype :AAAA :qclass :IN}]}
+            r (resolver/resolve-query test-config {} q)]
+        (is (= :noerror (:rcode r)))
+        (is (empty? (:answers r)))
+        (is (= :SOA (:type (first (:authority r)))))))
+
+    (testing "node1.ingress with other query type returns SOA in authority"
+      (let [q {:id 507 :qr? false :questions [{:qname "node1.ingress.example.com" :qtype :TXT :qclass :IN}]}
+            r (resolver/resolve-query test-config {} q)]
+        (is (= :noerror (:rcode r)))
+        (is (empty? (:answers r)))
+        (is (= :SOA (:type (first (:authority r)))))))))
+
+;; Property tests
 (defspec prop-resolver-invariants
   100
   (prop/for-all [id (gen/choose 0 65535)
-                 sub (gen/elements ["@" "www" "docs" "mvn"])
+                 sub (gen/elements ["@" "www" "docs" "mvn" "ingress"])
                  qtype (gen/elements [:A :AAAA :NS :SOA :MX :TXT :CAA :ANY])]
                 (let [qname (if (= sub "@") "example.com" (str sub ".example.com"))
                       query {:id id
@@ -185,3 +239,18 @@
                        (true? (:aa? resp))
                        (= :noerror (:rcode resp))
                        (= qname (:qname (first (:questions resp))))))))
+
+(defspec prop-node-ingress-resolution
+  100
+  (prop/for-all [id (gen/choose 0 65535)
+                 node-idx (gen/choose 1 3)
+                 qtype (gen/elements [:A :AAAA :TXT :MX :SOA])]
+                (let [qname (str "node" node-idx ".ingress.example.com")
+                      query {:id id :qr? false :rd? true :questions [{:qname qname :qtype qtype :qclass :IN}]}
+                      resp (resolver/resolve-query test-config {} query)]
+                  (and (= id (:id resp))
+                       (= :noerror (:rcode resp))
+                       (if (= qtype :A)
+                         (= (get-in test-config [:cluster :nodes (keyword (str "ns" node-idx)) :ip4])
+                            (:rdata (first (:answers resp))))
+                         true)))))

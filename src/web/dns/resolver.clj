@@ -99,6 +99,53 @@
                         rotated)
          :authority []}))))
 
+(def ^:private node-ingress-map
+  {"node1.ingress" :ns1
+   "node2.ingress" :ns2
+   "node3.ingress" :ns3})
+
+(defn- resolve-static-node-query
+  "Resolves A/AAAA records for a specific cluster node config."
+  [base-response qname qtype node-cfg opts]
+  (let [ttl (:ttl opts)
+        config (:config opts)]
+    (case qtype
+      (:A :ANY)
+      (if-let [ip4 (:ip4 node-cfg)]
+        (assoc base-response
+               :rcode :noerror
+               :answers [{:name qname
+                          :type :A
+                          :class :IN
+                          :ttl ttl
+                          :rdata ip4}]
+               :authority [])
+        (assoc base-response
+               :rcode :noerror
+               :answers []
+               :authority [(make-soa-record config)]))
+
+      :AAAA
+      (if-let [ip6 (:ip6 node-cfg)]
+        (assoc base-response
+               :rcode :noerror
+               :answers [{:name qname
+                          :type :AAAA
+                          :class :IN
+                          :ttl ttl
+                          :rdata ip6}]
+               :authority [])
+        (assoc base-response
+               :rcode :noerror
+               :answers []
+               :authority [(make-soa-record config)]))
+
+      ;; Any other record on static node host
+      (assoc base-response
+             :rcode :noerror
+             :answers []
+             :authority [(make-soa-record config)]))))
+
 (defn resolve-query
   "Pure authoritative DNS query resolver.
    Resolves query-pkt against config and cluster-state.
@@ -165,49 +212,23 @@
                                :questions questions
                                :additional []}]
 
-            ;; 2. Nameserver host queries (ns1, ns2, ns3)
-            (if (contains? #{"ns1" "ns2" "ns3"} relative)
+            (cond
+              ;; 2. Nameserver host queries (ns1, ns2, ns3)
+              (contains? #{"ns1" "ns2" "ns3"} relative)
               (let [node-kw (keyword relative)
                     node-cfg (get-in config [:cluster :nodes node-kw])
                     ns-ttl (get-in config [:dns :ns-ttl-seconds] 3600)]
-                (case qtype
-                  (:A :ANY)
-                  (if-let [ip4 (:ip4 node-cfg)]
-                    (assoc base-response
-                           :rcode :noerror
-                           :answers [{:name qname
-                                      :type :A
-                                      :class :IN
-                                      :ttl ns-ttl
-                                      :rdata ip4}]
-                           :authority [])
-                    (assoc base-response
-                           :rcode :noerror
-                           :answers []
-                           :authority [(make-soa-record config)]))
+                (resolve-static-node-query base-response qname qtype node-cfg {:ttl ns-ttl :config config}))
 
-                  :AAAA
-                  (if-let [ip6 (:ip6 node-cfg)]
-                    (assoc base-response
-                           :rcode :noerror
-                           :answers [{:name qname
-                                      :type :AAAA
-                                      :class :IN
-                                      :ttl ns-ttl
-                                      :rdata ip6}]
-                           :authority [])
-                    (assoc base-response
-                           :rcode :noerror
-                           :answers []
-                           :authority [(make-soa-record config)]))
-
-                  ;; Any other record on ns host
-                  (assoc base-response
-                         :rcode :noerror
-                         :answers []
-                         :authority [(make-soa-record config)])))
+              ;; 2b. Node ingress host queries (node1.ingress, node2.ingress, node3.ingress)
+              (contains? node-ingress-map relative)
+              (let [node-kw (get node-ingress-map relative)
+                    node-cfg (get-in config [:cluster :nodes node-kw])
+                    ttl (get-in config [:dns :ttl-seconds] 60)]
+                (resolve-static-node-query base-response qname qtype node-cfg {:ttl ttl :config config}))
 
               ;; 3. Check if host is configured in-zone
+              :else
               (let [subdomains (set (get-in config [:dns :subdomains]))
                     txt-records (get-in config [:dns :txt-records] {})
                     acme-challenges (:acme-dns-challenges cluster-st {})

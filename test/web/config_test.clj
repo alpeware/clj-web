@@ -19,7 +19,7 @@
             :port 53
             :ttl-seconds 60
             :ns-ttl-seconds 3600
-            :subdomains #{"@" "www" "docs" "mvn"}
+            :subdomains #{"@" "www" "docs" "mvn" "ingress" "node1.ingress" "node2.ingress" "node3.ingress"}
             :caa-records [{:flags 0 :tag "issue" :value "letsencrypt.org"}]}
            (:dns cfg/default-config)))
     (is (= {:enabled? true
@@ -64,7 +64,7 @@
       (is (= 60 (get-in cfg [:dns :ttl-seconds])))
       (is (= 3600 (get-in cfg [:dns :ns-ttl-seconds])))
       (is (= "hostmaster.example.com" (get-in cfg [:dns :hostmaster])))
-      (is (= #{"@" "www" "docs" "mvn"} (get-in cfg [:dns :subdomains])))
+      (is (= #{"@" "www" "docs" "mvn" "ingress" "node1.ingress" "node2.ingress" "node3.ingress"} (get-in cfg [:dns :subdomains])))
       (is (= [{:preference 10 :exchange "ns1.example.com"}
               {:preference 20 :exchange "ns2.example.com"}
               {:preference 30 :exchange "ns3.example.com"}]
@@ -237,6 +237,27 @@
       (is (thrown? clojure.lang.ExceptionInfo (cfg/normalize-fingerprint "")))
       (is (thrown? clojure.lang.ExceptionInfo (cfg/normalize-fingerprint "not-a-fingerprint")))
       (is (thrown? clojure.lang.ExceptionInfo (cfg/normalize-fingerprint "AA:BB:CC"))))))
+
+(deftest test-ingress-target-config
+  (testing "valid ingress-target configuration is preserved"
+    (let [cfg (cfg/normalize-config {:node/id :ns1
+                                     :domain "example.com"
+                                     :http {:ingress-target {:host "127.0.0.1" :port 5010}}})]
+      (is (= {:host "127.0.0.1" :port 5010} (get-in cfg [:http :ingress-target])))))
+
+  (testing "invalid ingress-target throws ex-info"
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (cfg/normalize-config {:node/id :ns1
+                                        :domain "example.com"
+                                        :http {:ingress-target "not-a-map"}})))
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (cfg/normalize-config {:node/id :ns1
+                                        :domain "example.com"
+                                        :http {:ingress-target {:host "" :port 5010}}})))
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (cfg/normalize-config {:node/id :ns1
+                                        :domain "example.com"
+                                        :http {:ingress-target {:host "127.0.0.1" :port 70000}}})))))
 
 ;; Property-based test
 (def gen-valid-domain

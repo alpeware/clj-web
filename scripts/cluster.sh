@@ -750,7 +750,13 @@ REMOTE_FP
   for node in "${NODES[@]}"; do
     local ip
     ip="$(get_ip "$node")"
-    echo "Rendering config for ${node} (${ip})..."
+    local ingress_target_ip=""
+    case "$node" in
+      ns1) ingress_target_ip="35.212.129.138" ;;
+      ns2) ingress_target_ip="35.206.120.143" ;;
+      ns3) ingress_target_ip="35.211.71.139" ;;
+    esac
+    echo "Rendering config for ${node} (${ip}) [ingress target: ${ingress_target_ip}:5010]..."
     local tmp_cfg
     tmp_cfg="$(mktemp /tmp/config-${node}-XXXXXX.edn)"
     cat > "$tmp_cfg" << CFG_EOF
@@ -771,10 +777,11 @@ REMOTE_FP
        :ttl-seconds 60
        :ns-ttl-seconds 3600
        :hostmaster "hostmaster.${DOMAIN}"
-       :subdomains #{"@" "www" "docs" "mvn"}}
+       :subdomains #{"@" "www" "docs" "mvn" "ingress" "node1.ingress" "node2.ingress" "node3.ingress"}}
  :http {:bind-ip "0.0.0.0"
         :http-port 80
         :https-port 443
+        :ingress-target {:host "${ingress_target_ip}" :port 5010}
         :content-root "/var/www/clj-web/public"
         :directory-listing? true}
  :smtp {:enabled? true
