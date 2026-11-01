@@ -15,9 +15,9 @@ Bitecho embraces a source-first distribution model inspired by Gentoo Linux:
 
 | Repository | Default Branch | HEAD Commit | Canonical Clone URL |
 | :--- | :--- | :--- | :--- |
-| **bitecho** | `main` | `603c2f729a11` | `https://bitecho.org/git/bitecho.git` |
-| **clj-datachannel** | `main` | `fce3f22b5de2` | `https://bitecho.org/git/clj-datachannel.git` |
-| **clj-web** | `master` | `def56fe5ac44` | `https://bitecho.org/git/clj-web.git` |
+| **bitecho** | `main` | `8eabb371d0ae` | `https://bitecho.org/git/bitecho.git` |
+| **clj-datachannel** | `main` | `8af21e6595f8` | `https://bitecho.org/git/clj-datachannel.git` |
+| **clj-web** | `master` | `cc509bfbf056` | `https://bitecho.org/git/clj-web.git` |
 
 ### Clojure CLI (`deps.edn`) Dependencies
 
@@ -25,11 +25,11 @@ Bitecho embraces a source-first distribution model inspired by Gentoo Linux:
 ;; In your deps.edn
 {:deps
  {alpeware/bitecho {:git/url "https://bitecho.org/git/bitecho.git"
-                   :git/sha "603c2f729a11d55933600f86393e37f977671c31"}
+                   :git/sha "8eabb371d0ae9558aeeb4fc557e6638d99d42629"}
   alpeware/clj-datachannel {:git/url "https://bitecho.org/git/clj-datachannel.git"
-                           :git/sha "fce3f22b5de2929ca3b61a44042d41ee63e5d978"}
+                           :git/sha "8af21e6595f86dbee6317f429540259f88e047a6"}
   alpeware/clj-web {:git/url "https://bitecho.org/git/clj-web.git"
-                   :git/sha "def56fe5ac444a8e348deb4377af734c7faf8619"}}}
+                   :git/sha "cc509bfbf0567247209a4d4ef5ba948fa28ebf3b"}}}
 ```
 
 ---
