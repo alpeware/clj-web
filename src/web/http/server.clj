@@ -532,15 +532,19 @@
          _ (.submit vthread-executor
                     ^Runnable
                     (fn []
-                      (try
-                        (while (not (.isClosed front-door-sock))
+                      (while (not (.isClosed front-door-sock))
+                        (try
                           (let [client (.accept front-door-sock)]
                             (.submit vthread-executor
                                      ^Runnable
                                      (fn []
-                                       (handle-passthrough-connection! client passthrough-ctx)))))
-                        (catch SocketException _ nil)
-                        (catch Exception _ nil))))
+                                       (handle-passthrough-connection! client passthrough-ctx))))
+                          (catch SocketException _
+                            (when-not (.isClosed front-door-sock)
+                              (Thread/sleep 20)))
+                          (catch Throwable _
+                            (when-not (.isClosed front-door-sock)
+                              (Thread/sleep 20)))))))
 
          ;; 4. Start HTTP server (port 80 / ephemeral)
          http-server (HttpServer/create (InetSocketAddress. ^String bind-ip http-port) 0)
