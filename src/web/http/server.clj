@@ -539,11 +539,13 @@
                                      ^Runnable
                                      (fn []
                                        (handle-passthrough-connection! client passthrough-ctx))))
-                          (catch SocketException _
+                          (catch SocketException e
                             (when-not (.isClosed front-door-sock)
+                              (println "[HTTP] Front-door :443 accept SocketException:" (.getMessage e))
                               (Thread/sleep 20)))
-                          (catch Throwable _
+                          (catch Throwable t
                             (when-not (.isClosed front-door-sock)
+                              (println "[HTTP] Front-door :443 accept error:" (.getMessage t))
                               (Thread/sleep 20)))))))
 
          ;; 4. Start HTTP server (port 80 / ephemeral)
