@@ -441,7 +441,14 @@ KEYS_EOF
     # Ensure HEAD points to default branch
     git --git-dir="${bare_repo}" symbolic-ref HEAD "refs/heads/${def_branch}"
 
-    # Sign annotated tag 'verified'
+    # Sign annotated tag 'verified' in both source repo and bare export
+    git -C "${src_repo}" \
+      -c gpg.format=ssh \
+      -c user.signingkey="${SIGNING_KEY}" \
+      -c user.name="Bitecho Release" \
+      -c user.email="release@${DOMAIN}" \
+      tag -s -f verified HEAD -m "Verified snapshot of ${repo} on ${DOMAIN}"
+
     git --git-dir="${bare_repo}" \
       -c gpg.format=ssh \
       -c user.signingkey="${SIGNING_KEY}" \
@@ -661,6 +668,7 @@ cmd_publish_git() {
 cmd_deploy() {
   local staging=false
   local reset_certs=false
+  local include_app=false
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --staging)
@@ -669,6 +677,10 @@ cmd_deploy() {
         ;;
       --reset-certs)
         reset_certs=true
+        shift
+        ;;
+      --include-app)
+        include_app=true
         shift
         ;;
       *)
@@ -810,13 +822,17 @@ REMOTE_CFG
   # Export bare git repos, sign release tags, and generate documentation
   publish_git_repos
 
-  # 5. Sync static public/ directory
+  # 5. Sync static public/ directory (excluding live app/ unless --include-app is passed)
   echo "--> Step 5/6: Syncing public/ directory to /var/www/clj-web/public/..."
+  local app_exclude_args=(--exclude 'app/' --exclude 'app')
+  if [[ "$include_app" == true ]]; then
+    app_exclude_args=()
+  fi
   for node in "${NODES[@]}"; do
     local ip
     ip="$(get_ip "$node")"
     echo "Syncing public/ to ${node}..."
-    rsync -az --delete -e "ssh -o StrictHostKeyChecking=accept-new -i ${SSH_KEY}" \
+    rsync -az --delete "${app_exclude_args[@]}" -e "ssh -o StrictHostKeyChecking=accept-new -i ${SSH_KEY}" \
       "${ROOT_DIR}/public/" "${SSH_USER}@${ip}:/var/www/clj-web/public/"
   done
 
