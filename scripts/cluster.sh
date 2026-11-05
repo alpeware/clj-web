@@ -638,11 +638,25 @@ INDEX_EOF
 }
 
 cmd_publish_git() {
+  local include_docs=false
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --include-docs)
+        include_docs=true
+        shift
+        ;;
+      *)
+        echo "Unknown publish-git option: $1" >&2
+        return 1
+        ;;
+    esac
+  done
+
   echo "=== Publishing Canonical Git Repositories and Documentation ==="
   publish_git_repos
 
   echo ""
-  echo "--> Syncing public/ directory to all cluster nodes..."
+  echo "--> Syncing canonical bare git repositories to all cluster nodes..."
   for node in "${NODES[@]}"; do
     local ip
     ip="$(get_ip "$node")"
@@ -650,9 +664,15 @@ cmd_publish_git() {
       echo "Warning: IP address for node ${node} could not be resolved. Skipping." >&2
       continue
     fi
-    echo "Syncing public/ (excluding live app/) to ${node} (${ip})..."
-    rsync -az --delete --exclude 'app/' --exclude 'app' -e "ssh -o StrictHostKeyChecking=accept-new -i ${SSH_KEY}" \
-      "${ROOT_DIR}/public/" "${SSH_USER}@${ip}:/var/www/clj-web/public/"
+    if [[ "$include_docs" == true ]]; then
+      echo "Syncing public/ (including docs, excluding live app/) to ${node} (${ip})..."
+      rsync -az --delete --exclude 'app/' --exclude 'app' -e "ssh -o StrictHostKeyChecking=accept-new -i ${SSH_KEY}" \
+        "${ROOT_DIR}/public/" "${SSH_USER}@${ip}:/var/www/clj-web/public/"
+    else
+      echo "Syncing public/git/*.git (excluding live landing-page docs and app/) to ${node} (${ip})..."
+      rsync -az --delete --exclude 'index.md' -e "ssh -o StrictHostKeyChecking=accept-new -i ${SSH_KEY}" \
+        "${ROOT_DIR}/public/git/" "${SSH_USER}@${ip}:/var/www/clj-web/public/git/"
+    fi
   done
   echo ""
   echo "=== Git repositories successfully published and synced! ==="
@@ -1140,7 +1160,7 @@ Usage: $0 <command> [options]
 Commands:
   init                  Provision GCP projects, static IPs, firewall rules, VMs, and bootstrap OpenJDK 25
   deploy [--staging]    Build uberjar, sync public/ assets, generate DTLS fingerprints, render configs, and restart
-  publish-git           Export bare git repos, sign release tags, generate docs, and sync to cluster
+  publish-git [--include-docs]  Export bare git repos, sign release tags, generate docs, and sync bare repos to cluster
   status                Display cluster node states, IPs, memory usage, systemd status, DNS records, and email counts
   logs [ns1|ns2|ns3]    View systemd journal logs (streams if specific node is specified)
   mail [ns1|ns2|ns3]    List saved RFC 822 .eml emails replicated across the cluster
@@ -1168,7 +1188,7 @@ case "${1:-help}" in
     ;;
   publish-git)
     shift
-    cmd_publish_git
+    cmd_publish_git "$@"
     ;;
   status)
     cmd_status
