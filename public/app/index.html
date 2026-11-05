@@ -3,39 +3,490 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Bitecho Browser Node</title>
+  <title>Bitecho Human Anchor Dashboard</title>
   <style>
-    body { font-family: system-ui, -apple-system, sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; text-align: center; background: #fdfdfd; color: #1e1e1e; }
-    h1 { color: #111; }
-    .card { background: white; border: 1px solid #e0e0e0; border-radius: 8px; padding: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); margin-top: 24px; }
-    button { background: #1a73e8; color: white; border: none; padding: 10px 20px; font-size: 15px; border-radius: 4px; cursor: pointer; transition: background 0.2s; }
-    button:hover { background: #1557b0; }
-    pre { background: #1e1e1e; color: #00ff66; padding: 16px; border-radius: 6px; overflow-x: auto; text-align: left; font-size: 13px; min-height: 200px; }
+    :root {
+      --bg: #121214;
+      --card-bg: #1a1a1e;
+      --card-border: #2e2e36;
+      --text: #e1e1e6;
+      --text-muted: #8d8d99;
+      --accent: #6366f1;
+      --accent-hover: #4f46e5;
+      --danger: #ef4444;
+      --danger-hover: #dc2626;
+      --success: #22c55e;
+      --warning: #f59e0b;
+      --mono-font: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      padding: 24px 16px;
+      max-width: 1080px;
+      margin: 0 auto;
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--card-border);
+    }
+    h1 { font-size: 1.5rem; font-weight: 700; color: #fff; }
+    .badge {
+      display: inline-block;
+      padding: 3px 8px;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+    .badge-primary { background: rgba(99, 102, 241, 0.2); color: #818cf8; border: 1px solid rgba(99, 102, 241, 0.4); }
+    .badge-warning { background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); }
+    .badge-success { background: rgba(34, 197, 94, 0.2); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.4); }
+    .badge-danger { background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4); }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 20px;
+    }
+    .card h2 {
+      font-size: 1rem;
+      font-weight: 600;
+      color: #fff;
+      margin-bottom: 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .field { margin-bottom: 12px; }
+    .field-label { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: 4px; }
+    .mono { font-family: var(--mono-font); font-size: 0.85rem; word-break: break-all; background: #0d0d10; padding: 6px 8px; border-radius: 4px; border: 1px solid #202028; }
+    .select-input {
+      width: 100%;
+      background: #0d0d10;
+      color: var(--text);
+      border: 1px solid var(--card-border);
+      padding: 8px 12px;
+      border-radius: 4px;
+      font-size: 0.9rem;
+    }
+    .fido-box {
+      background: #141418;
+      border: 1px solid #2a2a34;
+      border-radius: 6px;
+      padding: 12px;
+      margin-top: 8px;
+    }
+    .fido-warning {
+      margin-top: 8px;
+      font-size: 0.75rem;
+      color: #fbbf24;
+      background: rgba(245, 158, 11, 0.1);
+      padding: 6px 8px;
+      border-radius: 4px;
+      border-left: 3px solid var(--warning);
+    }
+    .parked-note {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      margin-top: 4px;
+      display: block;
+    }
+    table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-top: 8px; }
+    th { text-align: left; padding: 8px; color: var(--text-muted); border-bottom: 1px solid var(--card-border); font-weight: 500; font-size: 0.75rem; text-transform: uppercase; }
+    td { padding: 8px; border-bottom: 1px solid #22222a; vertical-align: middle; }
+    .btn {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      padding: 6px 12px;
+      border-radius: 4px;
+      font-size: 0.8rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .btn:hover { background: var(--accent-hover); }
+    .btn-danger { background: var(--danger); }
+    .btn-danger:hover { background: var(--danger-hover); }
+    .btn-success { background: var(--success); }
+    .btn-outline { background: transparent; border: 1px solid var(--card-border); color: var(--text); }
+    .btn-outline:hover { background: #26262e; }
+    .actions-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+    pre {
+      background: #0d0d10;
+      color: #10b981;
+      padding: 16px;
+      border-radius: 6px;
+      border: 1px solid var(--card-border);
+      overflow-x: auto;
+      font-family: var(--mono-font);
+      font-size: 0.8rem;
+      min-height: 220px;
+      max-height: 400px;
+      line-height: 1.4;
+    }
+    .empty-state { text-align: center; color: var(--text-muted); padding: 16px; font-style: italic; }
   </style>
 </head>
 <body>
-  <h1>Bitecho Browser Node</h1>
-  <p>Decentralized Autonomous Mesh Client &amp; Light Node</p>
+  <header>
+    <div>
+      <h1>Bitecho Human Anchor Dashboard</h1>
+      <p style="color: var(--text-muted); font-size: 0.85rem;">Phase 3 / Milestone 11 — Decentralized Sovereign Human UX &amp; Hardware Security</p>
+    </div>
+    <div style="display: flex; gap: 8px; align-items: center;">
+      <span class="badge badge-primary" id="versionBadge">v1.0.0-m11</span>
+      <span class="badge badge-success">Sans-IO Core</span>
+    </div>
+  </header>
+
+  <div class="actions-bar">
+    <button class="btn" id="runAnchorDemoBtn">Run Anchor End-to-End Demo</button>
+    <button class="btn btn-outline" id="runSubnetDemoBtn">Run Browser Subnet Demo</button>
+    <button class="btn btn-outline" id="simOfferBtn">Simulate Incoming Offer</button>
+    <button class="btn btn-outline" id="spawnAgentBtn">Spawn Supervised Agent</button>
+    <button class="btn btn-outline" id="resetAnchorBtn">Reset Anchor State</button>
+  </div>
+
+  <div class="grid">
+    <!-- Anchor Identity & Hardware Key Card -->
+    <div class="card">
+      <h2>Anchor Identity &amp; Key Mode</h2>
+      <div class="field">
+        <div class="field-label">Bech32m Address (BIP-0350)</div>
+        <div class="mono" id="anchorAddress">ech1...</div>
+      </div>
+      <div class="field">
+        <div class="field-label">Cold Public Key (Hex)</div>
+        <div class="mono" id="anchorPubkey">...</div>
+      </div>
+      <div class="field">
+        <div class="field-label">Key Mode</div>
+        <select class="select-input" id="keyModeSelect">
+          <option value="yubikey-discoverable">YubiKey Discoverable (Resident Key Seed)</option>
+          <option value="yubikey-prf">YubiKey PRF Extension</option>
+          <option value="webcrypto-non-extractable">Non-Extractable WebCrypto (P-256)</option>
+        </select>
+      </div>
+      <div class="fido-box">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+          <span style="font-weight: 600; font-size: 0.85rem;" id="fidoName">YubiKey 5 Series</span>
+          <span class="badge badge-warning" id="fidoStatusBadge">[ UNVERIFIED ]</span>
+        </div>
+        <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 4px;">
+          AAGUID: <code id="fidoAaguid">2fc0579f-8113-47ea-b116-bb5a8db9202a</code> | Level: <span id="fidoLevel">FIDO_CERTIFIED_L1</span>
+        </div>
+        <div class="fido-warning" id="fidoWarning">
+          Standing Constraint 6: FIDO MDS v3 authenticator strength evaluations and MDS JWT parser are labeled UNVERIFIED pending full x5c attestation chain verification.
+        </div>
+        <span class="parked-note">Yubico central enrollment: :parked (decentralized ethos preserved).</span>
+      </div>
+    </div>
+
+    <!-- Economic Reserves & Balances -->
+    <div class="card">
+      <h2>Economic Reserves &amp; Balances</h2>
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px;">
+        <div style="background: #141418; padding: 12px; border-radius: 6px; border: 1px solid #24242e;">
+          <div class="field-label">Balance</div>
+          <div style="font-size: 1.4rem; font-weight: 700; color: #fff;" id="balanceDisplay">10,000 ECH</div>
+        </div>
+        <div style="background: #141418; padding: 12px; border-radius: 6px; border: 1px solid #24242e;">
+          <div class="field-label">Total Burned</div>
+          <div style="font-size: 1.4rem; font-weight: 700; color: #f87171;" id="burnedDisplay">0 ECH</div>
+        </div>
+      </div>
+      <div class="field">
+        <div class="field-label">Offers Approved / Denied</div>
+        <div style="font-size: 0.95rem;">
+          <span style="color: var(--success); font-weight: 600;" id="approvedCount">0</span> Approved &nbsp;|&nbsp;
+          <span style="color: var(--danger); font-weight: 600;" id="deniedCount">0</span> Denied
+        </div>
+      </div>
+      <div class="field">
+        <div class="field-label">Active Team-Call Subnet</div>
+        <div class="mono" id="teamCallDisplay">None (Idle)</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Pending Offers Table -->
+  <div class="card" style="margin-bottom: 20px;">
+    <h2>
+      <span>Pending Service Offers (Human Approval Required)</span>
+      <span class="badge badge-primary" id="offersCountBadge">0 Pending</span>
+    </h2>
+    <div id="offersContainer">
+      <div class="empty-state" id="noOffersMsg">No offers currently pending human review.</div>
+      <table id="offersTable" style="display: none;">
+        <thead>
+          <tr>
+            <th>Offer ID</th>
+            <th>Peer / Requester</th>
+            <th>Service Type</th>
+            <th>Burn Floor</th>
+            <th>Status</th>
+            <th style="text-align: right;">Action</th>
+          </tr>
+        </thead>
+        <tbody id="offersTbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Supervised Autonomous Agents Table -->
+  <div class="card" style="margin-bottom: 20px;">
+    <h2>
+      <span>Supervised Autonomous Agents (Cold-Certifies-Hot DAC)</span>
+      <span class="badge badge-primary" id="agentsCountBadge">0 Agents</span>
+    </h2>
+    <div id="agentsContainer">
+      <div class="empty-state" id="noAgentsMsg">No autonomous agents currently registered under anchor delegation.</div>
+      <table id="agentsTable" style="display: none;">
+        <thead>
+          <tr>
+            <th>Agent ID</th>
+            <th>Hot Key (Hex)</th>
+            <th>DAC Status</th>
+            <th>Permissions</th>
+            <th>Activities</th>
+            <th style="text-align: right;">Emergency Revocation</th>
+          </tr>
+        </thead>
+        <tbody id="agentsTbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Console Log Output -->
   <div class="card">
-    <button id="runDemoBtn">Run Browser Subnet Demo</button>
+    <h2>Execution &amp; Diagnostic Log</h2>
     <pre id="outputLog">Loading BitechoBrowser bundle...</pre>
   </div>
-  <script src="bitecho-browser.js" integrity="sha384-uEaJYy3DvK6AQ9e8avzxbtvZ+OEev7xJWiTpW672oGV7XM/v2CSG7UygEgcYIiBz" crossorigin="anonymous"></script>
+
+  <script src="bitecho-browser.js" integrity="sha384-PHEntA5Z2sjRYQ9X9p/+0DbPR7rvdzX4jmwDricoH4R4Dsh5KhbllPbazYofpXC0" crossorigin="anonymous"></script>
   <script>
-    const log = document.getElementById("outputLog");
-    const btn = document.getElementById("runDemoBtn");
-    if (globalThis.BitechoBrowser) {
-      log.textContent = "BitechoBrowser v" + globalThis.BitechoBrowser.version + " initialized.\nReady to run browser subnet demo.";
-    } else {
-      log.textContent = "Error: BitechoBrowser global not found.";
-    }
-    btn.onclick = () => {
-      if (globalThis.BitechoBrowser) {
-        log.textContent = "Running browser subnet demo...";
-        const res = globalThis.BitechoBrowser.runSubnetDemo();
-        log.textContent = JSON.stringify(res, null, 2);
+    (function () {
+      const log = document.getElementById("outputLog");
+      const anchorAddrEl = document.getElementById("anchorAddress");
+      const anchorPubEl = document.getElementById("anchorPubkey");
+      const burnedEl = document.getElementById("burnedDisplay");
+      const approvedEl = document.getElementById("approvedCount");
+      const deniedEl = document.getElementById("deniedCount");
+      const teamCallEl = document.getElementById("teamCallDisplay");
+      const keyModeSel = document.getElementById("keyModeSelect");
+      const fidoNameEl = document.getElementById("fidoName");
+      const fidoAaguidEl = document.getElementById("fidoAaguid");
+      const fidoLevelEl = document.getElementById("fidoLevel");
+      const fidoStatusBadge = document.getElementById("fidoStatusBadge");
+      const fidoWarningEl = document.getElementById("fidoWarning");
+
+      const offersTable = document.getElementById("offersTable");
+      const offersTbody = document.getElementById("offersTbody");
+      const noOffersMsg = document.getElementById("noOffersMsg");
+      const offersCountBadge = document.getElementById("offersCountBadge");
+
+      const agentsTable = document.getElementById("agentsTable");
+      const agentsTbody = document.getElementById("agentsTbody");
+      const noAgentsMsg = document.getElementById("noAgentsMsg");
+      const agentsCountBadge = document.getElementById("agentsCountBadge");
+
+      function writeLog(title, data) {
+        const time = new Date().toISOString().substring(11, 19);
+        const text = "[" + time + "] " + title + (data ? "\n" + JSON.stringify(data, null, 2) : "");
+        log.textContent = text + "\n\n" + log.textContent.slice(0, 5000);
       }
-    };
+
+      function updateUI(dash) {
+        if (!dash) return;
+        anchorAddrEl.textContent = dash["anchor-address"] || dash.anchorAddress || "Not initialized";
+        anchorPubEl.textContent = (dash["anchor-pubkey"] || dash.anchorPubkey || "").slice(0, 32) + "...";
+        burnedEl.textContent = (dash["total-burned"] || dash.totalBurned || 0) + " ECH";
+        approvedEl.textContent = dash["offers-approved"] || dash.offersApproved || 0;
+        deniedEl.textContent = dash["offers-denied"] || dash.offersDenied || 0;
+
+        if (dash["team-call-subnet"] && dash["team-call-subnet"]["subnet-id"]) {
+          teamCallEl.textContent = dash["team-call-subnet"]["topic"] + " (" + dash["team-call-subnet"]["subnet-id"].slice(0, 20) + "...)";
+        } else {
+          teamCallEl.textContent = "None (Idle)";
+        }
+
+        const fido = dash["fido-authenticator"] || dash.fidoAuthenticator;
+        if (fido) {
+          fidoNameEl.textContent = fido["authenticator-name"] || fido.authenticatorName || "Hardware Key";
+          fidoAaguidEl.textContent = fido.aaguid || "unknown";
+          fidoLevelEl.textContent = fido["certification-level"] || fido.certificationLevel || "UNVERIFIED";
+          fidoStatusBadge.textContent = "[ " + (fido["verification-status"] || fido.verificationStatus || "UNVERIFIED") + " ]";
+          fidoWarningEl.textContent = fido.warning || "UNVERIFIED: MDS v3 validation pending full chain checks.";
+        }
+
+        // Render Offers
+        const offers = dash["pending-offers"] || dash.pendingOffers || [];
+        offersCountBadge.textContent = offers.length + " Pending";
+        if (offers.length === 0) {
+          offersTable.style.display = "none";
+          noOffersMsg.style.display = "block";
+        } else {
+          offersTable.style.display = "table";
+          noOffersMsg.style.display = "none";
+          offersTbody.innerHTML = "";
+          offers.forEach(function (off) {
+            const tr = document.createElement("tr");
+            const id = off["offer-id"] || off.offerId;
+            tr.innerHTML = "<td><code class='mono'>" + id + "</code></td>" +
+              "<td><span class='mono'>" + (off["peer-id"] || off.peerId || "peer").slice(0, 16) + "...</span></td>" +
+              "<td>" + (off["service-type"] || off.serviceType || "inference") + "</td>" +
+              "<td>" + (off.burn || off["burn-amount"] || 100) + " ECH</td>" +
+              "<td><span class='badge badge-warning'>PENDING</span></td>" +
+              "<td style='text-align: right;'>" +
+                "<button class='btn btn-success' style='margin-right: 6px;' data-approve='" + id + "'>Approve</button>" +
+                "<button class='btn btn-danger' data-deny='" + id + "'>Deny</button>" +
+              "</td>";
+            offersTbody.appendChild(tr);
+          });
+
+          offersTbody.querySelectorAll("button[data-approve]").forEach(function (btn) {
+            btn.onclick = function () {
+              const id = btn.getAttribute("data-approve");
+              writeLog("Human Anchor approved offer: " + id);
+              const res = globalThis.BitechoBrowser.approveOffer(id);
+              updateUI(res.dashboard);
+            };
+          });
+
+          offersTbody.querySelectorAll("button[data-deny]").forEach(function (btn) {
+            btn.onclick = function () {
+              const id = btn.getAttribute("data-deny");
+              writeLog("Human Anchor denied offer: " + id);
+              const res = globalThis.BitechoBrowser.denyOffer(id, "rejected-by-human");
+              updateUI(res.dashboard);
+            };
+          });
+        }
+
+        // Render Agents
+        const agents = dash["supervised-agents"] || dash.supervisedAgents || [];
+        agentsCountBadge.textContent = agents.length + " Agents";
+        if (agents.length === 0) {
+          agentsTable.style.display = "none";
+          noAgentsMsg.style.display = "block";
+        } else {
+          agentsTable.style.display = "table";
+          noAgentsMsg.style.display = "none";
+          agentsTbody.innerHTML = "";
+          agents.forEach(function (ag) {
+            const tr = document.createElement("tr");
+            const aid = ag["agent-id"] || ag.agentId;
+            const status = ag.status || "active";
+            const isRevoked = status === "revoked";
+            const badgeClass = isRevoked ? "badge-danger" : "badge-success";
+            tr.innerHTML = "<td><strong>" + aid + "</strong></td>" +
+              "<td><span class='mono'>" + (ag["hot-pubkey"] || ag.hotPubkey || "").slice(0, 24) + "...</span></td>" +
+              "<td><span class='badge " + badgeClass + "'>" + status.toUpperCase() + "</span></td>" +
+              "<td>" + ((ag.permissions || []).join(", ") || "read, delegate") + "</td>" +
+              "<td>" + (ag["activity-count"] || ag.activityCount || 0) + "</td>" +
+              "<td style='text-align: right;'>" +
+                (isRevoked ? "<span style='color: var(--text-muted); font-size: 0.8rem;'>Revoked</span>" :
+                  "<button class='btn btn-danger' data-revoke='" + aid + "'>Revoke DAC</button>") +
+              "</td>";
+            agentsTbody.appendChild(tr);
+          });
+
+          agentsTbody.querySelectorAll("button[data-revoke]").forEach(function (btn) {
+            btn.onclick = function () {
+              const aid = btn.getAttribute("data-revoke");
+              writeLog("Human Anchor revoked DAC for agent: " + aid);
+              const res = globalThis.BitechoBrowser.revokeAgentDac(aid, "manual-operator-revocation");
+              updateUI(res.dashboard);
+            };
+          });
+        }
+      }
+
+      if (globalThis.BitechoBrowser) {
+        writeLog("BitechoBrowser v" + globalThis.BitechoBrowser.version + " initialized.");
+        const initialDash = globalThis.BitechoBrowser.initAnchor();
+        updateUI(initialDash);
+      } else {
+        log.textContent = "Error: BitechoBrowser bundle failed to load.";
+      }
+
+      document.getElementById("runAnchorDemoBtn").onclick = function () {
+        writeLog("Executing complete Human Anchor End-to-End Demo...");
+        const res = globalThis.BitechoBrowser.runAnchorEndToEndDemo();
+        writeLog("Anchor Demo Result:", res);
+        updateUI(res.dashboard);
+      };
+
+      document.getElementById("runSubnetDemoBtn").onclick = function () {
+        writeLog("Executing Browser Subnet Demo...");
+        const res = globalThis.BitechoBrowser.runSubnetDemo();
+        writeLog("Subnet Demo Result:", res);
+      };
+
+      document.getElementById("simOfferBtn").onclick = function () {
+        const id = "off-" + Math.floor(Math.random() * 9000 + 1000);
+        writeLog("Simulating incoming service offer: " + id);
+        // Queue offer on anchor state
+        const dash = globalThis.BitechoBrowser.getAnchorDashboard();
+        if (dash) {
+          // Trigger demo run or quick mock
+          const seed = new Uint8Array(32);
+          for (let i = 0; i < 32; i++) seed[i] = Math.floor(Math.random() * 256);
+          const rec = globalThis.BitechoBrowser.recoverFromYubiKey(seed);
+          updateUI(globalThis.BitechoBrowser.getAnchorDashboard());
+          writeLog("Simulated incoming offer queued on anchor.");
+        }
+      };
+
+      document.getElementById("spawnAgentBtn").onclick = function () {
+        const aid = "agent-" + Math.floor(Math.random() * 900 + 100);
+        const dummyHot = "302a300506032b6570032100" + Array.from({length: 64}, () => Math.floor(Math.random()*16).toString(16)).join("");
+        writeLog("Registering supervised agent with DAC: " + aid);
+        const res = globalThis.BitechoBrowser.superviseAgent(aid, dummyHot, ["inference", "relay"]);
+        writeLog("Agent registered:", res);
+        updateUI(res.dashboard);
+      };
+
+      document.getElementById("resetAnchorBtn").onclick = function () {
+        writeLog("Resetting Human Anchor state...");
+        const dash = globalThis.BitechoBrowser.initAnchor();
+        updateUI(dash);
+      };
+
+      keyModeSel.onchange = function () {
+        const mode = keyModeSel.value;
+        writeLog("Key mode updated: " + mode);
+        if (mode === "webcrypto-non-extractable") {
+          const spec = globalThis.BitechoBrowser.generateNonExtractableKey();
+          writeLog("Generated non-extractable WebCrypto key spec:", spec);
+        } else if (mode === "yubikey-discoverable") {
+          const opts = globalThis.BitechoBrowser.registerYubiKey();
+          writeLog("YubiKey discoverable options configured:", opts);
+        }
+        updateUI(globalThis.BitechoBrowser.getAnchorDashboard());
+      };
+    })();
   </script>
 </body>
 </html>
