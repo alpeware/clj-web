@@ -227,183 +227,183 @@
        :response/body "Method Not Allowed\n"}
 
       :else
-      (let [content-root (get-in config [:http :content-root] "/var/www/clj-web/public")
-            resolved (resolve-safe-path content-root (get-in request [:request/uri :path]))]
-        (case (:status resolved)
-          :forbidden
-          {:response/status 403
-           :response/headers {"Content-Type" "text/plain; charset=utf-8"}
-           :response/body "Forbidden\n"}
+      (let [res (let [content-root (get-in config [:http :content-root] "/var/www/clj-web/public")
+                      resolved (resolve-safe-path content-root (get-in request [:request/uri :path]))]
+                  (case (:status resolved)
+                    :forbidden
+                    {:response/status 403
+                     :response/headers {"Content-Type" "text/plain; charset=utf-8"}
+                     :response/body "Forbidden\n"}
 
-          :not-found
-          {:response/status 404
-           :response/headers {"Content-Type" "text/plain; charset=utf-8"}
-           :response/body "Not Found\n"}
+                    :not-found
+                    {:response/status 404
+                     :response/headers {"Content-Type" "text/plain; charset=utf-8"}
+                     :response/body "Not Found\n"}
 
-          :ok
-          (let [^File file (:file resolved)]
-            (if (.isDirectory file)
-              ;; Directory: check for index.md or index.html or generate listing
-              (let [idx-md (io/file file "index.md")
-                    idx-html (io/file file "index.html")]
-                (cond
-                  (.exists idx-md)
-                  (serve-static-request-internal config cache-atom
-                                                 (assoc-in request [:request/uri :path]
-                                                           (str (str/replace-first (get-in request [:request/uri :path]) #"/$" "") "/index.md")))
+                    :ok
+                    (let [^File file (:file resolved)]
+                      (if (.isDirectory file)
+                          ;; Directory: check for index.md or index.html or generate listing
+                        (let [idx-md (io/file file "index.md")
+                              idx-html (io/file file "index.html")]
+                          (cond
+                            (.exists idx-md)
+                            (serve-static-request-internal config cache-atom
+                                                           (assoc-in request [:request/uri :path]
+                                                                     (str (str/replace-first (get-in request [:request/uri :path]) #"/$" "") "/index.md")))
 
-                  (.exists idx-html)
-                  (serve-static-request-internal config cache-atom
-                                                 (assoc-in request [:request/uri :path]
-                                                           (str (str/replace-first (get-in request [:request/uri :path]) #"/$" "") "/index.html")))
+                            (.exists idx-html)
+                            (serve-static-request-internal config cache-atom
+                                                           (assoc-in request [:request/uri :path]
+                                                                     (str (str/replace-first (get-in request [:request/uri :path]) #"/$" "") "/index.html")))
 
-                  (get-in config [:http :directory-listing?] true)
-                  (let [rel-path (:relative-path resolved)
-                        entries (.listFiles file)
-                        sorted-entries (sort-by (fn [^File f] [(if (.isDirectory f) 0 1) (.getName f)]) (or entries []))
-                        lines (concat
-                               [(str "# Index of /" rel-path "\n")]
-                               (when (and rel-path (not (str/blank? rel-path)))
-                                 ["- [../](../)"])
-                               (for [^File f sorted-entries
-                                     :let [name (.getName f)
-                                           is-dir? (.isDirectory f)
-                                           display-name (if is-dir? (str name "/") name)
-                                           href (if is-dir? (str name "/") name)]]
-                                 (if is-dir?
-                                   (str "- [" display-name "](" href ")")
-                                   (str "- [" display-name "](" href ") (" (.length f) " bytes)"))))
-                        body-str (str/join "\n" lines)
-                        body-bytes (.getBytes ^String body-str StandardCharsets/UTF_8)
-                        etag (str "\"" (sha256-hex body-bytes) "\"")
-                        headers {"Content-Type" "text/markdown; charset=utf-8"
-                                 "ETag" etag
-                                 "Content-Length" (str (alength body-bytes))
-                                 "Cache-Control" "public, max-age=60"}]
-                    (if (= method :HEAD)
-                      {:response/status 200 :response/headers headers :response/body nil}
-                      {:response/status 200 :response/headers headers :response/body body-bytes}))
+                            (get-in config [:http :directory-listing?] true)
+                            (let [rel-path (:relative-path resolved)
+                                  entries (.listFiles file)
+                                  sorted-entries (sort-by (fn [^File f] [(if (.isDirectory f) 0 1) (.getName f)]) (or entries []))
+                                  lines (concat
+                                         [(str "# Index of /" rel-path "\n")]
+                                         (when (and rel-path (not (str/blank? rel-path)))
+                                           ["- [../](../)"])
+                                         (for [^File f sorted-entries
+                                               :let [name (.getName f)
+                                                     is-dir? (.isDirectory f)
+                                                     display-name (if is-dir? (str name "/") name)
+                                                     href (if is-dir? (str name "/") name)]]
+                                           (if is-dir?
+                                             (str "- [" display-name "](" href ")")
+                                             (str "- [" display-name "](" href ") (" (.length f) " bytes)"))))
+                                  body-str (str/join "\n" lines)
+                                  body-bytes (.getBytes ^String body-str StandardCharsets/UTF_8)
+                                  etag (str "\"" (sha256-hex body-bytes) "\"")
+                                  headers {"Content-Type" "text/markdown; charset=utf-8"
+                                           "ETag" etag
+                                           "Content-Length" (str (alength body-bytes))
+                                           "Cache-Control" "public, max-age=60"}]
+                              (if (= method :HEAD)
+                                {:response/status 200 :response/headers headers :response/body nil}
+                                {:response/status 200 :response/headers headers :response/body body-bytes}))
 
-                  :else
-                  {:response/status 403
-                   :response/headers {"Content-Type" "text/plain; charset=utf-8"}
-                   :response/body "Directory listing disabled\n"}))
+                            :else
+                            {:response/status 403
+                             :response/headers {"Content-Type" "text/plain; charset=utf-8"}
+                             :response/body "Directory listing disabled\n"}))
 
-              ;; Regular file
-              (let [canonical-path (.getCanonicalPath file)
-                    mtime (.lastModified file)
-                    file-size (.length file)
-                    max-file-bytes (or (:max-file-bytes @cache-atom)
-                                       (get-in config [:http :cache-max-file-bytes] 2097152))
-                    tier1? (<= file-size max-file-bytes)
-                    ct (content-type-for-path (.getName file))
+                          ;; Regular file
+                        (let [canonical-path (.getCanonicalPath file)
+                              mtime (.lastModified file)
+                              file-size (.length file)
+                              max-file-bytes (or (:max-file-bytes @cache-atom)
+                                                 (get-in config [:http :cache-max-file-bytes] 2097152))
+                              tier1? (<= file-size max-file-bytes)
+                              ct (content-type-for-path (.getName file))
 
-                    ;; Cache load or populate
-                    entry (if tier1?
-                            (if-let [cached (cache-get @cache-atom canonical-path mtime file-size)]
-                              (do
-                                (swap! cache-atom cache-touch canonical-path)
-                                cached)
-                              (let [raw-bytes (Files/readAllBytes (.toPath file))
-                                    sha256 (sha256-hex raw-bytes)
-                                    etag (str "\"" sha256 "\"")
-                                    compressible? (compressible-content-type? ct)
-                                    gz-bytes (when compressible? (gzip-bytes raw-bytes))
-                                    cached-bytes (+ (alength raw-bytes) (if gz-bytes (alength gz-bytes) 0))
-                                    new-entry {:tier 1
-                                               :raw-bytes raw-bytes
-                                               :gzip-bytes gz-bytes
-                                               :etag etag
-                                               :sha256 sha256
-                                               :mtime mtime
-                                               :size file-size
-                                               :content-type ct
-                                               :cached-bytes cached-bytes}]
-                                (swap! cache-atom cache-put canonical-path new-entry)
-                                new-entry))
-                            ;; Tier 2: streaming metadata only
-                            (if-let [cached (cache-get @cache-atom canonical-path mtime file-size)]
-                              (do
-                                (swap! cache-atom cache-touch canonical-path)
-                                cached)
-                              (let [sha256 (sha256-file file)
-                                    etag (str "\"" sha256 "\"")
-                                    new-entry {:tier 2
-                                               :file file
-                                               :etag etag
-                                               :sha256 sha256
-                                               :mtime mtime
-                                               :size file-size
-                                               :content-type ct
-                                               :cached-bytes 0}]
-                                (swap! cache-atom cache-put canonical-path new-entry)
-                                new-entry)))
+                                ;; Cache load or populate
+                              entry (if tier1?
+                                      (if-let [cached (cache-get @cache-atom canonical-path mtime file-size)]
+                                        (do
+                                          (swap! cache-atom cache-touch canonical-path)
+                                          cached)
+                                        (let [raw-bytes (Files/readAllBytes (.toPath file))
+                                              sha256 (sha256-hex raw-bytes)
+                                              etag (str "\"" sha256 "\"")
+                                              compressible? (compressible-content-type? ct)
+                                              gz-bytes (when compressible? (gzip-bytes raw-bytes))
+                                              cached-bytes (+ (alength raw-bytes) (if gz-bytes (alength gz-bytes) 0))
+                                              new-entry {:tier 1
+                                                         :raw-bytes raw-bytes
+                                                         :gzip-bytes gz-bytes
+                                                         :etag etag
+                                                         :sha256 sha256
+                                                         :mtime mtime
+                                                         :size file-size
+                                                         :content-type ct
+                                                         :cached-bytes cached-bytes}]
+                                          (swap! cache-atom cache-put canonical-path new-entry)
+                                          new-entry))
+                                        ;; Tier 2: streaming metadata only
+                                      (if-let [cached (cache-get @cache-atom canonical-path mtime file-size)]
+                                        (do
+                                          (swap! cache-atom cache-touch canonical-path)
+                                          cached)
+                                        (let [sha256 (sha256-file file)
+                                              etag (str "\"" sha256 "\"")
+                                              new-entry {:tier 2
+                                                         :file file
+                                                         :etag etag
+                                                         :sha256 sha256
+                                                         :mtime mtime
+                                                         :size file-size
+                                                         :content-type ct
+                                                         :cached-bytes 0}]
+                                          (swap! cache-atom cache-put canonical-path new-entry)
+                                          new-entry)))
 
-                    etag (:etag entry)
-                    inm-header (first (get (:request/headers request) :header/if-none-match))
-                    range-header (first (get (:request/headers request) :header/range))]
+                              etag (:etag entry)
+                              inm-header (first (get (:request/headers request) :header/if-none-match))
+                              range-header (first (get (:request/headers request) :header/range))]
 
-                ;; 1. Conditional check: If-None-Match
-                (if (and inm-header (= (str/trim inm-header) etag))
-                  {:response/status 304
-                   :response/headers {"ETag" etag
-                                      "Cache-Control" "public, max-age=3600"}
-                   :response/body nil}
+                            ;; 1. Conditional check: If-None-Match
+                          (if (and inm-header (= (str/trim inm-header) etag))
+                            {:response/status 304
+                             :response/headers {"ETag" etag
+                                                "Cache-Control" "public, max-age=3600"}
+                             :response/body nil}
 
-                  ;; 2. HTTP Range request
-                  (if range-header
-                    (if-let [[start end] (parse-byte-range range-header file-size)]
-                      (let [part-len (inc (- end start))
-                            headers {"Content-Type" ct
-                                     "Content-Range" (str "bytes " start "-" end "/" file-size)
-                                     "Accept-Ranges" "bytes"
-                                     "Content-Length" (str part-len)
-                                     "ETag" etag
-                                     "X-Checksum-SHA256" (:sha256 entry)}
-                            body (cond
-                                   (= method :HEAD) nil
-                                   tier1? (Arrays/copyOfRange ^bytes (:raw-bytes entry) (int start) (int (inc end)))
-                                   :else {:file file :offset start :length part-len})]
-                        {:response/status 206
-                         :response/headers headers
-                         :response/body body})
-                      {:response/status 416
-                       :response/headers {"Content-Range" (str "bytes */" file-size)}
-                       :response/body nil})
+                              ;; 2. HTTP Range request
+                            (if range-header
+                              (if-let [[start end] (parse-byte-range range-header file-size)]
+                                (let [part-len (inc (- end start))
+                                      headers {"Content-Type" ct
+                                               "Content-Range" (str "bytes " start "-" end "/" file-size)
+                                               "Accept-Ranges" "bytes"
+                                               "Content-Length" (str part-len)
+                                               "ETag" etag
+                                               "X-Checksum-SHA256" (:sha256 entry)}
+                                      body (cond
+                                             (= method :HEAD) nil
+                                             tier1? (Arrays/copyOfRange ^bytes (:raw-bytes entry) (int start) (int (inc end)))
+                                             :else {:file file :offset start :length part-len})]
+                                  {:response/status 206
+                                   :response/headers headers
+                                   :response/body body})
+                                {:response/status 416
+                                 :response/headers {"Content-Range" (str "bytes */" file-size)}
+                                 :response/body nil})
 
-                    ;; 3. Full 200 OK response (with Gzip negotiation)
-                    (let [base-headers {"Content-Type" ct
-                                        "Accept-Ranges" "bytes"
-                                        "ETag" etag
-                                        "X-Checksum-SHA256" (:sha256 entry)}
-                          ae-header (first (get (:request/headers request) :header/accept-encoding))
-                          gzip-accepted? (and ae-header (str/includes? (str/lower-case ae-header) "gzip"))
-                          gz-bytes (:gzip-bytes entry)
-                          serve-gzip? (and tier1?
-                                           gzip-accepted?
-                                           gz-bytes
-                                           (< (alength ^bytes gz-bytes) file-size))]
-                      (if serve-gzip?
-                        (let [headers (assoc base-headers
-                                             "Content-Encoding" "gzip"
-                                             "Vary" "Accept-Encoding"
-                                             "Content-Length" (str (alength ^bytes gz-bytes)))]
-                          {:response/status 200
-                           :response/headers headers
-                           :response/body (if (= method :HEAD) nil gz-bytes)})
-                        (let [headers (assoc base-headers
-                                             "Content-Length" (str file-size))
-                              body (cond
-                                     (= method :HEAD) nil
-                                     tier1? (:raw-bytes entry)
-                                     :else {:file file :offset 0 :length file-size})]
-                          {:response/status 200
-                           :response/headers headers
-                           :response/body body})))))))))))))
+                                ;; 3. Full 200 OK response (with Gzip negotiation)
+                              (let [base-headers {"Content-Type" ct
+                                                  "Accept-Ranges" "bytes"
+                                                  "ETag" etag
+                                                  "X-Checksum-SHA256" (:sha256 entry)}
+                                    ae-header (first (get (:request/headers request) :header/accept-encoding))
+                                    gzip-accepted? (and ae-header (str/includes? (str/lower-case ae-header) "gzip"))
+                                    gz-bytes (:gzip-bytes entry)
+                                    serve-gzip? (and tier1?
+                                                     gzip-accepted?
+                                                     gz-bytes
+                                                     (< (alength ^bytes gz-bytes) file-size))]
+                                (if serve-gzip?
+                                  (let [headers (assoc base-headers
+                                                       "Content-Encoding" "gzip"
+                                                       "Vary" "Accept-Encoding"
+                                                       "Content-Length" (str (alength ^bytes gz-bytes)))]
+                                    {:response/status 200
+                                     :response/headers headers
+                                     :response/body (if (= method :HEAD) nil gz-bytes)})
+                                  (let [headers (assoc base-headers
+                                                       "Content-Length" (str file-size))
+                                        body (cond
+                                               (= method :HEAD) nil
+                                               tier1? (:raw-bytes entry)
+                                               :else {:file file :offset 0 :length file-size})]
+                                    {:response/status 200
+                                     :response/headers headers
+                                     :response/body body}))))))))))]
+        (update res :response/headers #(merge cors-headers %))))))
 
 (defn serve-static-request
   "Processes a static GET, HEAD, or OPTIONS request using content cache and zero-copy streaming.
    Supports ETag/304, Range/206, Gzip compression, Markdown directory listings, and CORS."
   [config cache-atom request]
-  (let [res (serve-static-request-internal config cache-atom request)]
-    (update res :response/headers #(merge cors-headers %))))
+  (serve-static-request-internal config cache-atom request))

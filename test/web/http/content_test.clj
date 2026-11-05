@@ -112,11 +112,11 @@
       (let [root-str (.getAbsolutePath root)
             cfg {:http {:content-root root-str}}
             cache-atom (atom (content/init-content-cache))]
-        (testing "POST / PUT / DELETE rejected with 405 Method Not Allowed"
+        (testing "POST / PUT / DELETE rejected with 405 Method Not Allowed (without CORS headers)"
           (let [res (content/serve-static-request cfg cache-atom {:request/method :POST :request/uri {:path "/"}})]
             (is (= 405 (:response/status res)))
             (is (= "GET, HEAD, OPTIONS" (get (:response/headers res) "Allow")))
-            (is (= "*" (get (:response/headers res) "Access-Control-Allow-Origin")))))
+            (is (nil? (get (:response/headers res) "Access-Control-Allow-Origin")))))
 
         (testing "OPTIONS preflight returns 204 with CORS headers"
           (let [res (content/serve-static-request cfg cache-atom {:request/method :OPTIONS :request/uri {:path "/bundle.js"}})]

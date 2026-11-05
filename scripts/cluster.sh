@@ -650,8 +650,8 @@ cmd_publish_git() {
       echo "Warning: IP address for node ${node} could not be resolved. Skipping." >&2
       continue
     fi
-    echo "Syncing public/ to ${node} (${ip})..."
-    rsync -az --delete -e "ssh -o StrictHostKeyChecking=accept-new -i ${SSH_KEY}" \
+    echo "Syncing public/ (excluding live app/) to ${node} (${ip})..."
+    rsync -az --delete --exclude 'app/' --exclude 'app' -e "ssh -o StrictHostKeyChecking=accept-new -i ${SSH_KEY}" \
       "${ROOT_DIR}/public/" "${SSH_USER}@${ip}:/var/www/clj-web/public/"
   done
   echo ""

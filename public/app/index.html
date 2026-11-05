@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' https: wss:; img-src 'self' data:; object-src 'none'; base-uri 'self';">
   <title>Bitecho Human Anchor Dashboard</title>
   <style>
     :root {
@@ -360,7 +361,7 @@
     <pre id="outputLog">Loading BitechoBrowser bundle...</pre>
   </div>
 
-  <script src="/app/bitecho-browser.js" integrity="sha384-2gmEn/D23gHfm+ADb/km7bH9UxNPaXEEPHyJepevYGaAqvCzdCQLJ2IRANmg30e7" crossorigin="anonymous"></script>
+  <script src="/app/bitecho-browser.js" integrity="sha384-mKYIm/YtQrgGyMgOFsi37oW18CrasLyTpr47OJSA0FE/Zet9tXxg6gFXyzD+ydGZ" crossorigin="anonymous"></script>
   <script>
     (function () {
       const log = document.getElementById("outputLog");
@@ -402,7 +403,21 @@
       function sanitizeLogData(obj) {
         if (!obj || typeof obj !== "object") return obj;
         if (Array.isArray(obj)) return obj.map(sanitizeLogData);
-        const forbidden = new Set(["seed", "private-key", "privkey-bytes", "keypair", "privateKey", "privkeyBytes", "id", "rawId", "x25519"]);
+        const forbidden = new Set([
+          "seed", "seed-bytes", "seed_bytes", "seedBytes",
+          "private-key", "private_key", "privateKey", "privkey",
+          "privkey-bytes", "privkey_bytes", "privkeyBytes",
+          "privkey-hex", "privkey_hex", "privkeyHex",
+          "cold-privkey", "cold_privkey", "coldPrivkey",
+          "keypair", "id", "rawId", "raw_id", "raw-id",
+          "userHandle", "user_handle", "user-handle",
+          "x25519", "ephemeral-priv", "ephemeral_priv", "ephemeralPriv",
+          "tx-key", "tx_key", "txKey", "rx-key", "rx_key", "rxKey",
+          "session-keys", "session_keys", "sessionKeys",
+          "shared-secret", "shared_secret", "sharedSecret",
+          "prfOutput", "prf_output", "prf-output",
+          "backup-seed", "backup_seed", "backupSeed"
+        ]);
         const clean = {};
         for (const k of Object.keys(obj)) {
           if (!forbidden.has(k)) {
@@ -687,6 +702,10 @@
         writeLog("Sending sealed message to " + target + ": " + text);
         try {
           const res = globalThis.BitechoBrowser.sendMessage(target, text);
+          if (!res || res.ok === false) {
+            writeLog("Send message failed: " + ((res && res.error) || "no-open-session-for-peer"), res);
+            return;
+          }
           writeLog("Message sent:", res);
           chatInput.value = "";
         } catch (err) {
