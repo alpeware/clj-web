@@ -152,10 +152,10 @@
   <header>
     <div>
       <h1>Bitecho Human Anchor Dashboard</h1>
-      <p style="color: var(--text-muted); font-size: 0.85rem;">Phase 3 / Milestone 11 — Decentralized Sovereign Human UX &amp; Hardware Security</p>
+      <p style="color: var(--text-muted); font-size: 0.85rem;">Phase 3 / Milestone 12 — Fractal Composition, Zero-Burn Subnets &amp; Domain Federation</p>
     </div>
     <div style="display: flex; gap: 8px; align-items: center;">
-      <span class="badge badge-primary" id="versionBadge">v1.0.0-m11</span>
+      <span class="badge badge-primary" id="versionBadge">v1.0.0-m12</span>
       <span class="badge badge-success">Sans-IO Core</span>
     </div>
   </header>
@@ -163,7 +163,11 @@
   <div class="actions-bar">
     <button class="btn" id="runAnchorDemoBtn">Run Anchor End-to-End Demo</button>
     <button class="btn btn-outline" id="runSubnetDemoBtn">Run Browser Subnet Demo</button>
+    <button class="btn btn-outline" id="runZeroBurnSubnetBtn">Run Zero-Burn Subnet Demo</button>
+    <button class="btn btn-outline" id="runFederationBtn">Run Domain Federation Demo</button>
     <button class="btn btn-outline" id="simOfferBtn">Simulate Incoming Offer</button>
+    <button class="btn btn-outline" id="registerYubiKeyBtn">Register Hardware YubiKey</button>
+    <button class="btn btn-outline" id="recoverYubiKeyBtn">Recover from YubiKey</button>
     <button class="btn btn-outline" id="spawnAgentBtn">Spawn Supervised Agent</button>
     <button class="btn btn-outline" id="resetAnchorBtn">Reset Anchor State</button>
   </div>
@@ -284,7 +288,7 @@
     <pre id="outputLog">Loading BitechoBrowser bundle...</pre>
   </div>
 
-  <script src="bitecho-browser.js" integrity="sha384-PHEntA5Z2sjRYQ9X9p/+0DbPR7rvdzX4jmwDricoH4R4Dsh5KhbllPbazYofpXC0" crossorigin="anonymous"></script>
+  <script src="/app/bitecho-browser.js" integrity="sha384-hup4mfC7zOqCnOg1N077lQG2mvc9by6q1zIPMAsww42v4+4r+LUHubscpUaz1pY6" crossorigin="anonymous"></script>
   <script>
     (function () {
       const log = document.getElementById("outputLog");
@@ -319,29 +323,42 @@
 
       function updateUI(dash) {
         if (!dash) return;
-        anchorAddrEl.textContent = dash["anchor-address"] || dash.anchorAddress || "Not initialized";
-        anchorPubEl.textContent = (dash["anchor-pubkey"] || dash.anchorPubkey || "").slice(0, 32) + "...";
-        burnedEl.textContent = (dash["total-burned"] || dash.totalBurned || 0) + " ECH";
-        approvedEl.textContent = dash["offers-approved"] || dash.offersApproved || 0;
-        deniedEl.textContent = dash["offers-denied"] || dash.offersDenied || 0;
+        const ident = dash.identity || {};
+        const acct = dash.accounting || {};
 
-        if (dash["team-call-subnet"] && dash["team-call-subnet"]["subnet-id"]) {
-          teamCallEl.textContent = dash["team-call-subnet"]["topic"] + " (" + dash["team-call-subnet"]["subnet-id"].slice(0, 20) + "...)";
+        anchorAddrEl.textContent = ident.address || dash["anchor-address"] || dash.anchorAddress || "Not initialized";
+        anchorPubEl.textContent = (ident["anchor-pubkey"] || dash["anchor-pubkey"] || dash.anchorPubkey || "").slice(0, 32) + "...";
+        burnedEl.textContent = (acct["burned-ech"] ?? dash["total-burned"] ?? dash.totalBurned ?? 0) + " ECH";
+        approvedEl.textContent = acct["offers-approved"] ?? dash["offers-approved"] ?? dash.offersApproved ?? 0;
+        deniedEl.textContent = acct["offers-denied"] ?? dash["offers-denied"] ?? dash.offersDenied ?? 0;
+
+        const balanceEl = document.getElementById("balanceDisplay");
+        if (balanceEl) {
+          const bal = acct.balance ?? dash.balance ?? 10000;
+          balanceEl.textContent = Number(bal).toLocaleString() + " ECH";
+        }
+
+        const tc = dash["team-call-subnet"] || dash.teamCallSubnet;
+        if (tc && (tc["subnet-id"] || tc.subnetId)) {
+          const sid = tc["subnet-id"] || tc.subnetId;
+          const topic = tc["topic-name"] || tc.topic || sid;
+          teamCallEl.textContent = topic + " (" + sid.slice(0, 24) + "...)";
         } else {
           teamCallEl.textContent = "None (Idle)";
         }
 
         const fido = dash["fido-authenticator"] || dash.fidoAuthenticator;
         if (fido) {
-          fidoNameEl.textContent = fido["authenticator-name"] || fido.authenticatorName || "Hardware Key";
-          fidoAaguidEl.textContent = fido.aaguid || "unknown";
-          fidoLevelEl.textContent = fido["certification-level"] || fido.certificationLevel || "UNVERIFIED";
+          fidoNameEl.textContent = fido["authenticator-name"] || fido.authenticatorName || (fido.metadata && fido.metadata.description) || fido.label || "Hardware Key";
+          fidoAaguidEl.textContent = fido.aaguid || (fido.metadata && fido.metadata.aaguid) || "unknown";
+          fidoLevelEl.textContent = fido["certification-level"] || fido.certificationLevel || (fido.metadata && fido.metadata["certification-level"]) || fido.strength || "UNVERIFIED";
           fidoStatusBadge.textContent = "[ " + (fido["verification-status"] || fido.verificationStatus || "UNVERIFIED") + " ]";
           fidoWarningEl.textContent = fido.warning || "UNVERIFIED: MDS v3 validation pending full chain checks.";
         }
 
         // Render Offers
-        const offers = dash["pending-offers"] || dash.pendingOffers || [];
+        const rawOffers = dash["pending-offers"] || dash.pendingOffers || [];
+        const offers = Array.isArray(rawOffers) ? rawOffers : Object.values(rawOffers);
         offersCountBadge.textContent = offers.length + " Pending";
         if (offers.length === 0) {
           offersTable.style.display = "none";
@@ -385,7 +402,8 @@
         }
 
         // Render Agents
-        const agents = dash["supervised-agents"] || dash.supervisedAgents || [];
+        const rawAgents = dash["supervised-agents"] || dash.supervisedAgents || [];
+        const agents = Array.isArray(rawAgents) ? rawAgents : Object.values(rawAgents);
         agentsCountBadge.textContent = agents.length + " Agents";
         if (agents.length === 0) {
           agentsTable.style.display = "none";
@@ -401,8 +419,8 @@
             const isRevoked = status === "revoked";
             const badgeClass = isRevoked ? "badge-danger" : "badge-success";
             tr.innerHTML = "<td><strong>" + aid + "</strong></td>" +
-              "<td><span class='mono'>" + (ag["hot-pubkey"] || ag.hotPubkey || "").slice(0, 24) + "...</span></td>" +
-              "<td><span class='badge " + badgeClass + "'>" + status.toUpperCase() + "</span></td>" +
+              "<td><span class='mono'>" + (ag["hot-pubkey"] || ag.hotPubkey || ag.address || "").slice(0, 24) + "...</span></td>" +
+              "<td><span class='badge " + badgeClass + "'>" + String(status).toUpperCase() + "</span></td>" +
               "<td>" + ((ag.permissions || []).join(", ") || "read, delegate") + "</td>" +
               "<td>" + (ag["activity-count"] || ag.activityCount || 0) + "</td>" +
               "<td style='text-align: right;'>" +
@@ -444,18 +462,48 @@
         writeLog("Subnet Demo Result:", res);
       };
 
+      document.getElementById("runZeroBurnSubnetBtn").onclick = function () {
+        writeLog("Executing Zero-Burn Team Subnet Demo...");
+        const res = globalThis.BitechoBrowser.runZeroBurnSubnetDemo();
+        writeLog("Zero-Burn Subnet Result:", res);
+      };
+
+      document.getElementById("runFederationBtn").onclick = function () {
+        writeLog("Executing Domain Federation Demo...");
+        const res = globalThis.BitechoBrowser.runFederationDemo();
+        writeLog("Domain Federation Result:", res);
+      };
+
       document.getElementById("simOfferBtn").onclick = function () {
-        const id = "off-" + Math.floor(Math.random() * 9000 + 1000);
-        writeLog("Simulating incoming service offer: " + id);
-        // Queue offer on anchor state
-        const dash = globalThis.BitechoBrowser.getAnchorDashboard();
-        if (dash) {
-          // Trigger demo run or quick mock
-          const seed = new Uint8Array(32);
-          for (let i = 0; i < 32; i++) seed[i] = Math.floor(Math.random() * 256);
-          const rec = globalThis.BitechoBrowser.recoverFromYubiKey(seed);
+        writeLog("Simulating incoming service offer...");
+        const dash = globalThis.BitechoBrowser.queueOffer();
+        updateUI(dash);
+        writeLog("Simulated incoming offer queued on anchor.");
+      };
+
+      document.getElementById("registerYubiKeyBtn").onclick = async function () {
+        writeLog("Prompting hardware authenticator (WebAuthn create)...");
+        try {
+          const cred = await globalThis.BitechoBrowser.createDiscoverableCredential();
+          writeLog("Credential created from hardware:", cred);
+          const rec = globalThis.BitechoBrowser.recoverFromYubiKey(cred);
           updateUI(globalThis.BitechoBrowser.getAnchorDashboard());
-          writeLog("Simulated incoming offer queued on anchor.");
+          writeLog("Anchor initialized from hardware YubiKey!");
+        } catch (err) {
+          writeLog("YubiKey registration error: " + (err.message || err));
+        }
+      };
+
+      document.getElementById("recoverYubiKeyBtn").onclick = async function () {
+        writeLog("Prompting hardware authenticator (WebAuthn get)...");
+        try {
+          const cred = await globalThis.BitechoBrowser.getDiscoverableCredential();
+          writeLog("Assertion returned from hardware:", cred);
+          const rec = globalThis.BitechoBrowser.recoverFromYubiKey(cred);
+          updateUI(globalThis.BitechoBrowser.getAnchorDashboard());
+          writeLog("Anchor recovered from hardware YubiKey!");
+        } catch (err) {
+          writeLog("YubiKey recovery error: " + (err.message || err));
         }
       };
 
