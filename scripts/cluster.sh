@@ -486,7 +486,7 @@ Core decentralized peer-to-peer messaging and coordination protocol in Clojure.
 
 - **Clone URL**: \`https://${DOMAIN}/git/bitecho.git\`
 - **Default Branch**: \`${b_branch}\`
-- **HEAD Commit**: \`${b_sha}\`
+- **HEAD / Verified Target**: \`${b_sha}\`
 - **GitHub Backup Mirror**: [https://github.com/alpeware/bitecho](https://github.com/alpeware/bitecho)
 
 ### Clojure CLI (\`deps.edn\`)
@@ -504,7 +504,7 @@ Pure Clojure WebRTC DataChannels library (SCTP over DTLS over UDP) targeting Ope
 
 - **Clone URL**: \`https://${DOMAIN}/git/clj-datachannel.git\`
 - **Default Branch**: \`${d_branch}\`
-- **HEAD Commit**: \`${d_sha}\`
+- **HEAD / Verified Target**: \`${d_sha}\`
 - **GitHub Backup Mirror**: [https://github.com/alpeware/clj-datachannel](https://github.com/alpeware/clj-datachannel)
 
 ### Clojure CLI (\`deps.edn\`)
@@ -522,14 +522,14 @@ Self-contained 3-node cluster system combining authoritative DNS (:53), static H
 
 - **Clone URL**: \`https://${DOMAIN}/git/clj-web.git\`
 - **Default Branch**: \`${w_branch}\`
-- **HEAD Commit**: \`${w_sha}\`
+- **HEAD / Verified Target**: \`verified\`
 - **GitHub Backup Mirror**: [https://github.com/alpeware/clj-web](https://github.com/alpeware/clj-web)
 
 ### Clojure CLI (\`deps.edn\`)
 
 \`\`\`clojure
 alpeware/clj-web {:git/url "https://${DOMAIN}/git/clj-web.git"
-                 :git/sha "${w_sha}"}
+                 :git/tag "verified"}
 \`\`\`
 
 ---
