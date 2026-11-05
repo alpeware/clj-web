@@ -7,3 +7,4 @@
 /cluster.edn
 /.cluster.env
 /public/git/
+/public/app/bitecho-browser.js

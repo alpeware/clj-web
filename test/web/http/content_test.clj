@@ -45,6 +45,10 @@
     (is (= "application/gzip" (content/content-type-for-path "archive.tar.gz")))
     (is (= "application/gzip" (content/content-type-for-path "archive.tgz")))
     (is (= "application/xml; charset=utf-8" (content/content-type-for-path "pom.xml")))
+    (is (= "application/javascript; charset=utf-8" (content/content-type-for-path "bitecho-browser.js")))
+    (is (= "application/javascript; charset=utf-8" (content/content-type-for-path "module.mjs")))
+    (is (= "text/plain; charset=utf-8" (content/content-type-for-path "bitecho-browser.js.sri")))
+    (is (true? (content/compressible-content-type? "application/javascript; charset=utf-8")))
     (is (= "application/octet-stream" (content/content-type-for-path "unknown.bin")))))
 
 (deftest test-resolve-safe-path
@@ -111,7 +115,15 @@
         (testing "POST / PUT / DELETE rejected with 405 Method Not Allowed"
           (let [res (content/serve-static-request cfg cache-atom {:request/method :POST :request/uri {:path "/"}})]
             (is (= 405 (:response/status res)))
-            (is (= "GET, HEAD" (get (:response/headers res) "Allow")))))
+            (is (= "GET, HEAD, OPTIONS" (get (:response/headers res) "Allow")))
+            (is (= "*" (get (:response/headers res) "Access-Control-Allow-Origin")))))
+
+        (testing "OPTIONS preflight returns 204 with CORS headers"
+          (let [res (content/serve-static-request cfg cache-atom {:request/method :OPTIONS :request/uri {:path "/bundle.js"}})]
+            (is (= 204 (:response/status res)))
+            (is (= "*" (get (:response/headers res) "Access-Control-Allow-Origin")))
+            (is (= "GET, HEAD, OPTIONS" (get (:response/headers res) "Access-Control-Allow-Methods")))
+            (is (nil? (:response/body res)))))
 
         (testing "Non-existent file returns 404"
           (let [res (content/serve-static-request cfg cache-atom {:request/method :GET :request/uri {:path "/no-such.txt"}})]

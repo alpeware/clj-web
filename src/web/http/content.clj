@@ -23,13 +23,16 @@
       (or (str/ends-with? lower ".tar.gz")
           (str/ends-with? lower ".tgz")) "application/gzip"
       (str/ends-with? lower ".md") "text/markdown; charset=utf-8"
+      (or (str/ends-with? lower ".js")
+          (str/ends-with? lower ".mjs")) "application/javascript; charset=utf-8"
       (or (str/ends-with? lower ".clj")
           (str/ends-with? lower ".cljc")
           (str/ends-with? lower ".cljs")
           (str/ends-with? lower ".edn")
           (str/ends-with? lower ".txt")
           (str/ends-with? lower ".sha1")
-          (str/ends-with? lower ".sha256")) "text/plain; charset=utf-8"
+          (str/ends-with? lower ".sha256")
+          (str/ends-with? lower ".sri")) "text/plain; charset=utf-8"
       (str/ends-with? lower ".sh") "text/x-shellscript; charset=utf-8"
       (or (str/ends-with? lower ".html")
           (str/ends-with? lower ".htm")) "text/html; charset=utf-8"
@@ -47,7 +50,15 @@
     (or (str/starts-with? ct-lower "text/")
         (str/includes? ct-lower "json")
         (str/includes? ct-lower "xml")
-        (str/includes? ct-lower "markdown"))))
+        (str/includes? ct-lower "markdown")
+        (str/includes? ct-lower "javascript"))))
+
+(def cors-headers
+  "Standard Cross-Origin Resource Sharing (CORS) headers for static content."
+  {"Access-Control-Allow-Origin" "*"
+   "Access-Control-Allow-Methods" "GET, HEAD, OPTIONS"
+   "Access-Control-Allow-Headers" "Content-Type, Range, If-None-Match"
+   "Access-Control-Expose-Headers" "ETag, X-Checksum-SHA256, Content-Length, Content-Range"})
 
 (defn- sha256-hex [^bytes bs]
   (let [md (MessageDigest/getInstance "SHA-256")
@@ -199,17 +210,23 @@
             (let [start (max 0 (- total-size suffix-len))]
               [start (dec total-size)])))))))
 
-(defn serve-static-request
-  "Processes a static GET or HEAD request using content cache and zero-copy streaming.
-   Supports ETag/304, Range/206, Gzip compression, and Markdown directory listings."
+(defn- serve-static-request-internal
+  "Internal static content request processor."
   [config cache-atom request]
   (let [method (:request/method request)]
-    (if-not (or (= method :GET) (= method :HEAD))
+    (cond
+      (= method :OPTIONS)
+      {:response/status 204
+       :response/headers cors-headers
+       :response/body nil}
+
+      (not (or (= method :GET) (= method :HEAD)))
       {:response/status 405
-       :response/headers {"Allow" "GET, HEAD"
+       :response/headers {"Allow" "GET, HEAD, OPTIONS"
                           "Content-Type" "text/plain; charset=utf-8"}
        :response/body "Method Not Allowed\n"}
 
+      :else
       (let [content-root (get-in config [:http :content-root] "/var/www/clj-web/public")
             resolved (resolve-safe-path content-root (get-in request [:request/uri :path]))]
         (case (:status resolved)
@@ -231,14 +248,14 @@
                     idx-html (io/file file "index.html")]
                 (cond
                   (.exists idx-md)
-                  (serve-static-request config cache-atom
-                                        (assoc-in request [:request/uri :path]
-                                                  (str (str/replace-first (get-in request [:request/uri :path]) #"/$" "") "/index.md")))
+                  (serve-static-request-internal config cache-atom
+                                                 (assoc-in request [:request/uri :path]
+                                                           (str (str/replace-first (get-in request [:request/uri :path]) #"/$" "") "/index.md")))
 
                   (.exists idx-html)
-                  (serve-static-request config cache-atom
-                                        (assoc-in request [:request/uri :path]
-                                                  (str (str/replace-first (get-in request [:request/uri :path]) #"/$" "") "/index.html")))
+                  (serve-static-request-internal config cache-atom
+                                                 (assoc-in request [:request/uri :path]
+                                                           (str (str/replace-first (get-in request [:request/uri :path]) #"/$" "") "/index.html")))
 
                   (get-in config [:http :directory-listing?] true)
                   (let [rel-path (:relative-path resolved)
@@ -383,3 +400,10 @@
                           {:response/status 200
                            :response/headers headers
                            :response/body body})))))))))))))
+
+(defn serve-static-request
+  "Processes a static GET, HEAD, or OPTIONS request using content cache and zero-copy streaming.
+   Supports ETag/304, Range/206, Gzip compression, Markdown directory listings, and CORS."
+  [config cache-atom request]
+  (let [res (serve-static-request-internal config cache-atom request)]
+    (update res :response/headers #(merge cors-headers %))))
