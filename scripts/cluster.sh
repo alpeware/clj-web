@@ -568,7 +568,7 @@ Bitecho embraces a source-first distribution model inspired by Gentoo Linux:
 
 ## Canonical Git Repositories
 
-| Repository | Default Branch | HEAD Commit | Canonical Clone URL |
+| Repository | Default Branch | HEAD / Verified Target | Canonical Clone URL |
 | :--- | :--- | :--- | :--- |
 | **bitecho** | \`${b_branch}\` | \`${b_sha:0:12}\` | \`https://${DOMAIN}/git/bitecho.git\` |
 | **clj-datachannel** | \`${d_branch}\` | \`${d_sha:0:12}\` | \`https://${DOMAIN}/git/clj-datachannel.git\` |
