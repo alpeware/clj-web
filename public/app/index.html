@@ -364,7 +364,7 @@
     <pre id="outputLog">Loading BitechoBrowser bundle...</pre>
   </div>
 
-  <script src="/app/bitecho-browser.js" integrity="sha384-aIqizsdn4UnuEv0yFsvBhUQEIrI5lzs2364E5M0ImUxV1Mavbdbk9UbK/1ls2MS3" crossorigin="anonymous"></script>
+  <script src="/app/bitecho-browser.js" integrity="sha384-9RpQiNdxp1C63qajEcmgxrPZBU6mHFpqL8t3z430/X1mjCNTweLwrI81HHtTAMMX" crossorigin="anonymous"></script>
   <script>
     (function () {
       const log = document.getElementById("outputLog");
@@ -743,11 +743,12 @@
         globalThis.BitechoBrowser.initNode();
         const initialDash = globalThis.BitechoBrowser.initAnchor();
         updateUI(initialDash);
-        if (typeof globalThis.BitechoBrowser.loadStateFromIndexedDb === "function") {
-          Promise.resolve(globalThis.BitechoBrowser.loadStateFromIndexedDb()).then(function (restored) {
-            if (restored && restored.pubkey) {
+        if (typeof globalThis.BitechoBrowser.loadStateFromIndexedDB === "function") {
+          Promise.resolve(globalThis.BitechoBrowser.loadStateFromIndexedDB()).then(function (restored) {
+            const restoredPub = restored && (restored.pubkey || (restored["light-state"] && restored["light-state"].pubkey));
+            if (restoredPub) {
               writeLog("Restored persisted public identity from IndexedDB (tap Recover from YubiKey to unlock signing):", {
-                pubkey: restored.pubkey,
+                pubkey: restoredPub,
                 address: restored.address,
                 hardwareLocked: restored.hardwareLocked
               });
