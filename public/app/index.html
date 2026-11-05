@@ -160,17 +160,89 @@
     </div>
   </header>
 
-  <div class="actions-bar">
-    <button class="btn" id="runAnchorDemoBtn">Run Anchor End-to-End Demo</button>
-    <button class="btn btn-outline" id="runSubnetDemoBtn">Run Browser Subnet Demo</button>
-    <button class="btn btn-outline" id="runZeroBurnSubnetBtn">Run Zero-Burn Subnet Demo</button>
-    <button class="btn btn-outline" id="runFederationBtn">Run Domain Federation Demo</button>
-    <button class="btn btn-outline" id="simOfferBtn">Simulate Incoming Offer</button>
-    <button class="btn btn-outline" id="registerYubiKeyBtn">Register Hardware YubiKey</button>
-    <button class="btn btn-outline" id="recoverYubiKeyBtn">Recover from YubiKey</button>
-    <button class="btn btn-outline" id="spawnAgentBtn">Spawn Supervised Agent</button>
-    <button class="btn btn-outline" id="resetAnchorBtn">Reset Anchor State</button>
+  <!-- Live Bitecho Mesh & Sealed Messenger (Axiom / Devnet) -->
+  <div class="card" style="margin-bottom: 24px; border: 1px solid rgba(99, 102, 241, 0.4); background: linear-gradient(180deg, #16161c 0%, #1a1a22 100%);">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; border-bottom: 1px solid var(--card-border); padding-bottom: 12px;">
+      <div>
+        <h2 style="font-size: 1.15rem; color: #fff; display: flex; align-items: center; gap: 8px;">
+          <span>⚡ Live Bitecho Mesh &amp; Sealed Messenger</span>
+          <span class="badge badge-warning" id="meshStatusBadge">DISCONNECTED</span>
+        </h2>
+        <p style="color: var(--text-muted); font-size: 0.8rem; margin-top: 2px;">
+          Real browser light-node over WebRTC DataChannel (node1: 35.212.129.138:5010)
+        </p>
+      </div>
+      <div>
+        <button class="btn btn-success" id="connectMeshBtn" style="font-size: 0.9rem; padding: 8px 16px;">Connect Live Devnet Mesh</button>
+      </div>
+    </div>
+
+    <!-- Live Messaging Grid: Target Peer / Channels & Chat Thread -->
+    <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 16px;">
+      <!-- Left: Peer & Session Control -->
+      <div>
+        <div class="field">
+          <div class="field-label">Target Peer (Handle or Ed25519 Pubkey)</div>
+          <div style="display: flex; gap: 8px;">
+            <input type="text" id="targetPeerInput" class="select-input" value="axiom" style="font-family: var(--mono-font); font-size: 0.85rem;" placeholder="axiom or pubkey hex">
+          </div>
+          <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 4px;">
+            Known: <strong>axiom</strong> (core architect), <strong>nexus</strong> (directory authority)
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 8px; margin-bottom: 16px;">
+          <button class="btn" id="openChannelBtn" style="flex: 1;">Open Sealed Channel</button>
+        </div>
+
+        <div class="field">
+          <div class="field-label" style="display: flex; justify-content: space-between;">
+            <span>Active Sealed Sessions</span>
+            <span id="sessionsCountBadge" class="badge badge-primary">0 Active</span>
+          </div>
+          <div id="sessionsContainer" style="max-height: 160px; overflow-y: auto; background: #0d0d10; border: 1px solid #202028; border-radius: 4px; padding: 6px;">
+            <div class="empty-state" style="padding: 10px; font-size: 0.75rem;" id="noSessionsMsg">No active sealed channels.</div>
+            <div id="sessionsList" style="display: none; font-size: 0.75rem;"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right: Sealed Chat Thread & Input -->
+      <div style="display: flex; flex-direction: column;">
+        <div class="field-label" style="display: flex; justify-content: space-between;">
+          <span>Live Sealed Chat (E2E AES-256-GCM / SACK)</span>
+          <span style="font-size: 0.72rem; color: #10b981;" id="activePeerLabel">Peer: axiom</span>
+        </div>
+        <div id="chatMessages" style="flex: 1; min-height: 160px; max-height: 220px; overflow-y: auto; background: #0d0d10; border: 1px solid #202028; border-radius: 4px; padding: 10px; margin-bottom: 10px; font-family: var(--mono-font); font-size: 0.8rem; line-height: 1.4;">
+          <div style="color: var(--text-muted); text-align: center; margin-top: 40px; font-style: italic;">
+            Connect to devnet mesh and open a sealed channel to message Axiom.
+          </div>
+        </div>
+        <div style="display: flex; gap: 8px;">
+          <input type="text" id="chatInput" class="select-input" placeholder="Type sealed message to Axiom..." style="flex: 1;">
+          <button class="btn btn-success" id="sendMessageBtn" style="white-space: nowrap;">Send Sealed Message</button>
+        </div>
+      </div>
+    </div>
   </div>
+
+  <!-- Collapsible Local Diagnostics & Offline Sandbox -->
+  <details style="margin-bottom: 20px; background: #16161c; border: 1px solid var(--card-border); border-radius: 6px; padding: 12px;">
+    <summary style="font-size: 0.85rem; font-weight: 600; cursor: pointer; color: var(--text-muted);">
+      🛠️ Local Diagnostics &amp; Offline Sandbox (Simulations &amp; Unit Scenarios)
+    </summary>
+    <div class="actions-bar" style="margin-top: 12px; margin-bottom: 0;">
+      <button class="btn btn-outline" id="runAnchorDemoBtn">Run Anchor End-to-End Demo</button>
+      <button class="btn btn-outline" id="runSubnetDemoBtn">Run Browser Subnet Demo</button>
+      <button class="btn btn-outline" id="runZeroBurnSubnetBtn">Run Zero-Burn Subnet Demo</button>
+      <button class="btn btn-outline" id="runFederationBtn">Run Domain Federation Demo</button>
+      <button class="btn btn-outline" id="simOfferBtn">Simulate Incoming Offer</button>
+      <button class="btn btn-outline" id="registerYubiKeyBtn">Register Hardware YubiKey</button>
+      <button class="btn btn-outline" id="recoverYubiKeyBtn">Recover from YubiKey</button>
+      <button class="btn btn-outline" id="spawnAgentBtn">Spawn Supervised Agent</button>
+      <button class="btn btn-outline" id="resetAnchorBtn">Reset Anchor State</button>
+    </div>
+  </details>
 
   <div class="grid">
     <!-- Anchor Identity & Hardware Key Card -->
@@ -198,7 +270,7 @@
           <span class="badge badge-warning" id="fidoStatusBadge">[ UNVERIFIED ]</span>
         </div>
         <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 4px;">
-          AAGUID: <code id="fidoAaguid">2fc0579f-8113-47ea-b116-bb5a8db9202a</code> | Level: <span id="fidoLevel">FIDO_CERTIFIED_L1</span>
+          AAGUID: <code id="fidoAaguid">2fc0579f-8113-47ea-b116-bb5a8db9202a</code> | Level: <span id="fidoLevel">UNVERIFIED</span>
         </div>
         <div class="fido-warning" id="fidoWarning">
           Standing Constraint 6: FIDO MDS v3 authenticator strength evaluations and MDS JWT parser are labeled UNVERIFIED pending full x5c attestation chain verification.
@@ -288,7 +360,7 @@
     <pre id="outputLog">Loading BitechoBrowser bundle...</pre>
   </div>
 
-  <script src="/app/bitecho-browser.js" integrity="sha384-hup4mfC7zOqCnOg1N077lQG2mvc9by6q1zIPMAsww42v4+4r+LUHubscpUaz1pY6" crossorigin="anonymous"></script>
+  <script src="/app/bitecho-browser.js" integrity="sha384-2gmEn/D23gHfm+ADb/km7bH9UxNPaXEEPHyJepevYGaAqvCzdCQLJ2IRANmg30e7" crossorigin="anonymous"></script>
   <script>
     (function () {
       const log = document.getElementById("outputLog");
@@ -315,9 +387,35 @@
       const noAgentsMsg = document.getElementById("noAgentsMsg");
       const agentsCountBadge = document.getElementById("agentsCountBadge");
 
+      const meshStatusBadge = document.getElementById("meshStatusBadge");
+      const connectMeshBtn = document.getElementById("connectMeshBtn");
+      const targetPeerInput = document.getElementById("targetPeerInput");
+      const openChannelBtn = document.getElementById("openChannelBtn");
+      const sessionsCountBadge = document.getElementById("sessionsCountBadge");
+      const noSessionsMsg = document.getElementById("noSessionsMsg");
+      const sessionsList = document.getElementById("sessionsList");
+      const activePeerLabel = document.getElementById("activePeerLabel");
+      const chatMessages = document.getElementById("chatMessages");
+      const chatInput = document.getElementById("chatInput");
+      const sendMessageBtn = document.getElementById("sendMessageBtn");
+
+      function sanitizeLogData(obj) {
+        if (!obj || typeof obj !== "object") return obj;
+        if (Array.isArray(obj)) return obj.map(sanitizeLogData);
+        const forbidden = new Set(["seed", "private-key", "privkey-bytes", "keypair", "privateKey", "privkeyBytes", "id", "rawId", "x25519"]);
+        const clean = {};
+        for (const k of Object.keys(obj)) {
+          if (!forbidden.has(k)) {
+            clean[k] = sanitizeLogData(obj[k]);
+          }
+        }
+        return clean;
+      }
+
       function writeLog(title, data) {
         const time = new Date().toISOString().substring(11, 19);
-        const text = "[" + time + "] " + title + (data ? "\n" + JSON.stringify(data, null, 2) : "");
+        const cleanData = data ? sanitizeLogData(data) : null;
+        const text = "[" + time + "] " + title + (cleanData ? "\n" + JSON.stringify(cleanData, null, 2) : "");
         log.textContent = text + "\n\n" + log.textContent.slice(0, 5000);
       }
 
@@ -441,10 +539,184 @@
         }
       }
 
+      function renderChatAndSessions(status) {
+        if (!status) return;
+
+        // 1. Mesh Connection Status
+        if (meshStatusBadge) {
+          if (status.meshConnected) {
+            const nodes = (status.connectedNodes && status.connectedNodes.length > 0)
+              ? status.connectedNodes.join(", ")
+              : "node1";
+            meshStatusBadge.className = "badge badge-success";
+            meshStatusBadge.textContent = "CONNECTED (" + nodes + ")";
+            if (connectMeshBtn) {
+              connectMeshBtn.textContent = "Mesh Connected";
+              connectMeshBtn.disabled = true;
+              connectMeshBtn.className = "btn btn-outline";
+            }
+          } else if (status.phase === "dialing" || status.phase === "connecting") {
+            meshStatusBadge.className = "badge badge-warning";
+            meshStatusBadge.textContent = "CONNECTING...";
+            if (connectMeshBtn) {
+              connectMeshBtn.textContent = "Connecting...";
+              connectMeshBtn.disabled = true;
+            }
+          } else {
+            meshStatusBadge.className = "badge badge-danger";
+            meshStatusBadge.textContent = "DISCONNECTED";
+            if (connectMeshBtn) {
+              connectMeshBtn.textContent = "Connect Live Devnet Mesh";
+              connectMeshBtn.disabled = false;
+              connectMeshBtn.className = "btn btn-success";
+            }
+          }
+        }
+
+        // 2. Active Sealed Sessions
+        const rawSessions = status.sessions || {};
+        const sessEntries = Array.isArray(rawSessions)
+          ? rawSessions
+          : Object.entries(rawSessions).map(function (entry) {
+              return Object.assign({ sessionId: entry[0] }, entry[1]);
+            });
+
+        if (sessionsCountBadge) {
+          sessionsCountBadge.textContent = sessEntries.length + " Active";
+        }
+
+        if (sessionsList && noSessionsMsg) {
+          if (sessEntries.length === 0) {
+            noSessionsMsg.style.display = "block";
+            sessionsList.style.display = "none";
+          } else {
+            noSessionsMsg.style.display = "none";
+            sessionsList.style.display = "flex";
+            sessionsList.style.flexDirection = "column";
+            sessionsList.style.gap = "6px";
+            sessionsList.innerHTML = "";
+            sessEntries.forEach(function (s) {
+              const item = document.createElement("div");
+              item.style.cssText = "background: #16161c; padding: 6px 10px; border-radius: 4px; border: 1px solid #282834; display: flex; justify-content: space-between; align-items: center;";
+              const peerShort = (s.peer || s.peerId || "peer").slice(0, 16) + "...";
+              const st = (s.status || "open").toUpperCase();
+              const badgeClass = st === "OPEN" ? "badge-success" : "badge-warning";
+              item.innerHTML = "<div>" +
+                "<strong style='color: #a5b4fc;'>" + (s.sessionId ? s.sessionId.slice(0, 12) + "..." : "session") + "</strong> " +
+                "<span style='color: var(--text-muted); font-size: 0.72rem;'>→ " + peerShort + "</span>" +
+                "</div>" +
+                "<span class='badge " + badgeClass + "' style='font-size: 0.65rem;'>" + st + "</span>";
+              sessionsList.appendChild(item);
+            });
+          }
+        }
+
+        // 3. Chat History Thread
+        if (chatMessages) {
+          const history = status.chatHistory || [];
+          if (history.length === 0) {
+            chatMessages.innerHTML = "<div style='color: var(--text-muted); text-align: center; margin-top: 40px; font-style: italic;'>" +
+              (status.meshConnected ? "Channel ready. Send a sealed message to Axiom." : "Connect to devnet mesh and open a sealed channel to message Axiom.") +
+              "</div>";
+          } else {
+            chatMessages.innerHTML = "";
+            history.forEach(function (msg) {
+              const msgDiv = document.createElement("div");
+              const isOutgoing = msg.direction === "outgoing";
+              msgDiv.style.cssText = "display: flex; flex-direction: column; margin-bottom: 8px; align-items: " + (isOutgoing ? "flex-end" : "flex-start") + ";";
+
+              const bubble = document.createElement("div");
+              bubble.style.cssText = "max-width: 80%; padding: 8px 12px; border-radius: 6px; font-size: 0.8rem; word-break: break-word; " +
+                (isOutgoing ? "background: #312e81; color: #e0e7ff; border: 1px solid #4338ca;" : "background: #064e3b; color: #d1fae5; border: 1px solid #047857;");
+
+              const header = document.createElement("div");
+              header.style.cssText = "font-size: 0.68rem; opacity: 0.75; margin-bottom: 2px; display: flex; justify-content: space-between; gap: 8px;";
+              const timeStr = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString() : "";
+              header.innerHTML = "<span>" + (isOutgoing ? "You" : (msg.peer || "Peer")) + "</span><span>" + timeStr + "</span>";
+
+              const body = document.createElement("div");
+              body.textContent = msg.text || "";
+
+              bubble.appendChild(header);
+              bubble.appendChild(body);
+              msgDiv.appendChild(bubble);
+              chatMessages.appendChild(msgDiv);
+            });
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+          }
+        }
+      }
+
+      if (connectMeshBtn) {
+        connectMeshBtn.onclick = function () {
+          writeLog("Connecting to live Bitecho Devnet Mesh via WebRTC DataChannel (node1: 35.212.129.138:5010)...");
+          try {
+            const res = globalThis.BitechoBrowser.connectMesh();
+            writeLog("Dialing mesh node1:", res);
+          } catch (err) {
+            writeLog("Mesh connection error: " + (err.message || err));
+          }
+        };
+      }
+
+      if (targetPeerInput) {
+        targetPeerInput.oninput = function () {
+          const val = targetPeerInput.value.trim() || "axiom";
+          if (activePeerLabel) activePeerLabel.textContent = "Peer: " + val;
+        };
+      }
+
+      if (openChannelBtn) {
+        openChannelBtn.onclick = function () {
+          const target = (targetPeerInput && targetPeerInput.value.trim()) || "axiom";
+          writeLog("Initiating signed channel offer to: " + target);
+          try {
+            const res = globalThis.BitechoBrowser.openChannel(target);
+            writeLog("Channel offer sent:", res);
+          } catch (err) {
+            writeLog("Failed to open channel: " + (err.message || err));
+          }
+        };
+      }
+
+      function doSendMessage() {
+        if (!chatInput) return;
+        const text = chatInput.value.trim();
+        if (!text) return;
+        const target = (targetPeerInput && targetPeerInput.value.trim()) || "axiom";
+        writeLog("Sending sealed message to " + target + ": " + text);
+        try {
+          const res = globalThis.BitechoBrowser.sendMessage(target, text);
+          writeLog("Message sent:", res);
+          chatInput.value = "";
+        } catch (err) {
+          writeLog("Send message error: " + (err.message || err));
+        }
+      }
+
+      if (sendMessageBtn) {
+        sendMessageBtn.onclick = doSendMessage;
+      }
+
+      if (chatInput) {
+        chatInput.onkeydown = function (e) {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            doSendMessage();
+          }
+        };
+      }
+
       if (globalThis.BitechoBrowser) {
         writeLog("BitechoBrowser v" + globalThis.BitechoBrowser.version + " initialized.");
+        globalThis.BitechoBrowser.initNode();
         const initialDash = globalThis.BitechoBrowser.initAnchor();
         updateUI(initialDash);
+        globalThis.BitechoBrowser.onStateChange(function (st) {
+          renderChatAndSessions(st);
+          updateUI(globalThis.BitechoBrowser.getAnchorDashboard());
+        });
+        renderChatAndSessions(globalThis.BitechoBrowser.getStatus());
       } else {
         log.textContent = "Error: BitechoBrowser bundle failed to load.";
       }
@@ -485,10 +757,19 @@
         writeLog("Prompting hardware authenticator (WebAuthn create)...");
         try {
           const cred = await globalThis.BitechoBrowser.createDiscoverableCredential();
-          writeLog("Credential created from hardware:", cred);
           const rec = globalThis.BitechoBrowser.recoverFromYubiKey(cred);
-          updateUI(globalThis.BitechoBrowser.getAnchorDashboard());
-          writeLog("Anchor initialized from hardware YubiKey!");
+          if (!rec || rec.ok === false) {
+            writeLog("YubiKey registration failed: " + ((rec && rec.error) || "recovery-failed"));
+            return;
+          }
+          const dash = globalThis.BitechoBrowser.getAnchorDashboard();
+          updateUI(dash);
+          renderChatAndSessions(globalThis.BitechoBrowser.getStatus());
+          writeLog("Anchor initialized from hardware YubiKey:", {
+            pubkey: (dash.identity && dash.identity["anchor-pubkey"]) || "unknown",
+            address: (dash.identity && dash.identity.address) || "unknown",
+            fidoStatus: (dash["fido-authenticator"] && dash["fido-authenticator"]["verification-status"]) || "UNVERIFIED"
+          });
         } catch (err) {
           writeLog("YubiKey registration error: " + (err.message || err));
         }
@@ -498,10 +779,19 @@
         writeLog("Prompting hardware authenticator (WebAuthn get)...");
         try {
           const cred = await globalThis.BitechoBrowser.getDiscoverableCredential();
-          writeLog("Assertion returned from hardware:", cred);
           const rec = globalThis.BitechoBrowser.recoverFromYubiKey(cred);
-          updateUI(globalThis.BitechoBrowser.getAnchorDashboard());
-          writeLog("Anchor recovered from hardware YubiKey!");
+          if (!rec || rec.ok === false) {
+            writeLog("YubiKey recovery failed: " + ((rec && rec.error) || "recovery-failed"));
+            return;
+          }
+          const dash = globalThis.BitechoBrowser.getAnchorDashboard();
+          updateUI(dash);
+          renderChatAndSessions(globalThis.BitechoBrowser.getStatus());
+          writeLog("Anchor recovered from hardware YubiKey:", {
+            pubkey: (dash.identity && dash.identity["anchor-pubkey"]) || "unknown",
+            address: (dash.identity && dash.identity.address) || "unknown",
+            fidoStatus: (dash["fido-authenticator"] && dash["fido-authenticator"]["verification-status"]) || "UNVERIFIED"
+          });
         } catch (err) {
           writeLog("YubiKey recovery error: " + (err.message || err));
         }
@@ -512,7 +802,10 @@
         const dummyHot = "302a300506032b6570032100" + Array.from({length: 64}, () => Math.floor(Math.random()*16).toString(16)).join("");
         writeLog("Registering supervised agent with DAC: " + aid);
         const res = globalThis.BitechoBrowser.superviseAgent(aid, dummyHot, ["inference", "relay"]);
-        writeLog("Agent registered:", res);
+        writeLog("Agent registered:", {
+          agentId: aid,
+          status: res.status || "active"
+        });
         updateUI(res.dashboard);
       };
 
@@ -527,10 +820,16 @@
         writeLog("Key mode updated: " + mode);
         if (mode === "webcrypto-non-extractable") {
           const spec = globalThis.BitechoBrowser.generateNonExtractableKey();
-          writeLog("Generated non-extractable WebCrypto key spec:", spec);
+          writeLog("Generated non-extractable WebCrypto key spec:", {
+            keyMode: "webcrypto-non-extractable",
+            status: "ready"
+          });
         } else if (mode === "yubikey-discoverable") {
           const opts = globalThis.BitechoBrowser.registerYubiKey();
-          writeLog("YubiKey discoverable options configured:", opts);
+          writeLog("YubiKey discoverable options configured:", {
+            keyMode: "yubikey-discoverable",
+            status: "configured"
+          });
         }
         updateUI(globalThis.BitechoBrowser.getAnchorDashboard());
       };
