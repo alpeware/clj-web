@@ -434,14 +434,7 @@ KEYS_EOF
     def_branch="$(git -C "${src_repo}" symbolic-ref --short HEAD 2>/dev/null || git -C "${src_repo}" branch --show-current 2>/dev/null || echo "master")"
     if [[ -z "$def_branch" ]]; then def_branch="master"; fi
 
-    echo "Exporting bare repository for ${repo} (${def_branch})..."
-    rm -rf "${bare_repo}"
-    git clone --bare --quiet "${src_repo}" "${bare_repo}"
-
-    # Ensure HEAD points to default branch
-    git --git-dir="${bare_repo}" symbolic-ref HEAD "refs/heads/${def_branch}"
-
-    # Sign annotated tag 'verified' in both source repo and bare export
+    # Sign annotated tag 'verified' in source repo before bare clone so both share the identical tag object
     git -C "${src_repo}" \
       -c gpg.format=ssh \
       -c user.signingkey="${SIGNING_KEY}" \
@@ -449,12 +442,12 @@ KEYS_EOF
       -c user.email="release@${DOMAIN}" \
       tag -s -f verified HEAD -m "Verified snapshot of ${repo} on ${DOMAIN}"
 
-    git --git-dir="${bare_repo}" \
-      -c gpg.format=ssh \
-      -c user.signingkey="${SIGNING_KEY}" \
-      -c user.name="Bitecho Release" \
-      -c user.email="release@${DOMAIN}" \
-      tag -s -f verified HEAD -m "Verified snapshot of ${repo} on ${DOMAIN}"
+    echo "Exporting bare repository for ${repo} (${def_branch})..."
+    rm -rf "${bare_repo}"
+    git clone --bare --quiet "${src_repo}" "${bare_repo}"
+
+    # Ensure HEAD points to default branch
+    git --git-dir="${bare_repo}" symbolic-ref HEAD "refs/heads/${def_branch}"
 
     # Pack objects, update dumb HTTP server info, and verify repository integrity
     rm -rf "${bare_repo}/objects/info/commit-graphs" "${bare_repo}/objects/info/commit-graph"
@@ -579,7 +572,7 @@ Bitecho embraces a source-first distribution model inspired by Gentoo Linux:
 | :--- | :--- | :--- | :--- |
 | **bitecho** | \`${b_branch}\` | \`${b_sha:0:12}\` | \`https://${DOMAIN}/git/bitecho.git\` |
 | **clj-datachannel** | \`${d_branch}\` | \`${d_sha:0:12}\` | \`https://${DOMAIN}/git/clj-datachannel.git\` |
-| **clj-web** | \`${w_branch}\` | \`${w_sha:0:12}\` | \`https://${DOMAIN}/git/clj-web.git\` |
+| **clj-web** | \`${w_branch}\` | \`verified\` | \`https://${DOMAIN}/git/clj-web.git\` |
 
 ### Clojure CLI (\`deps.edn\`) Dependencies
 
@@ -591,7 +584,7 @@ Bitecho embraces a source-first distribution model inspired by Gentoo Linux:
   alpeware/clj-datachannel {:git/url "https://${DOMAIN}/git/clj-datachannel.git"
                            :git/sha "${d_sha}"}
   alpeware/clj-web {:git/url "https://${DOMAIN}/git/clj-web.git"
-                   :git/sha "${w_sha}"}}}
+                   :git/tag "verified"}}}
 \`\`\`
 
 ---
