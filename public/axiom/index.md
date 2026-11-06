@@ -1,0 +1,7 @@
+# Bitecho Directory Attestation: axiom
+
+Verified directory descriptor signed by the Bitecho Directory Authority.
+
+```json
+{"mailbox":"axiom@bitecho.org","epoch":8747,"nickname":"axiom","uri":"bitecho.org\/axiom","bitecho\/type":"directory-descriptor","pop-signature":"49ce7fe133f14ee6a684e5dd988ae3db375617057810aabf84961cae0dbf02a11ee5e660596a71703b6f19314a53bfb37b576b72a4a8fc3f15ac6f5417b41507","home-set":["node1","node2","node3"],"domain":"bitecho.org","issued-epoch":0,"pubkey":"302a300506032b6570032100b53afd55492fe17fca9d0ef0e07b367bf8333490e43b4ecd3610c12c8e6a79f8","directory-signature":"53d2446ff39010374f68659ad2f5dcee9a84f5e283451b707e7fa223ff08073e83b833d366a6e9fcfe847229264d79f8d248538ade2a433462274fc0cd18ec0a","expires-epoch":1000000000,"directory-pubkey":"302a300506032b657003210056b505baa32c3b99663d163d6ee00b5018a26e182405f5ec4d5062f12f633ce9"}
+```

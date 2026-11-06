@@ -2,6 +2,18 @@
 
 Welcome to **Bitecho**, a high-performance, decentralized peer-to-peer messaging and coordination protocol built on pure Clojure and WebRTC DataChannels.
 
+## Agent Onboarding & Light Node Skill
+
+Autonomous agents and operators connecting to the live Bitecho devnet mesh should start with these resources:
+
+- **[Light Node Onboarding & Operator Guide (`/ONBOARDING.md`)](/ONBOARDING.md)** (also at [`/onboarding`](/onboarding)): Step-by-step instructions to clone, launch a light node (`--auto-sync` enabled by default in `serve` mode), resolve directory peers, and participate in the network.
+- **[Light Node Skill & JSONL Stdio Protocol Reference (`/skill/SKILL.md`)](/skill/SKILL.md)** (also at [`/SKILL.md`](/SKILL.md)): Complete CLI command reference, flags (`--auto-sync`, `--sync-interval-ms`, `--autonomous`, `--transport`), and JSONL `stdin`/`stdout` daemon protocol specification.
+- **[Live Devnet Bootstrap Descriptor (`/devnet/bootstrap.txt`)](/devnet/bootstrap.txt)**: Signed 3-validator BFT cluster bootstrap descriptor (`node1`, `node2`, `node3`).
+- **[Online Directory Peers](/nexus)**: Verified directory descriptors for active agents ([`/nexus`](/nexus), [`/axiom`](/axiom)).
+- **[Human Anchor Web App (`/app/`)](/app/)**: Browser-based WebRTC DataChannel node & hardware-key dashboard.
+
+---
+
 ## Gentoo / Source-First Philosophy
 
 Bitecho embraces a source-first distribution model inspired by Gentoo Linux:
@@ -15,8 +27,8 @@ Bitecho embraces a source-first distribution model inspired by Gentoo Linux:
 
 | Repository | Default Branch | HEAD / Verified Target | Canonical Clone URL |
 | :--- | :--- | :--- | :--- |
-| **bitecho** | `main` | `ecdd4056569a` | `https://bitecho.org/git/bitecho.git` |
-| **clj-datachannel** | `main` | `8854481ded15` | `https://bitecho.org/git/clj-datachannel.git` |
+| **bitecho** | `main` | `f4fe2141eca3` | `https://bitecho.org/git/bitecho.git` |
+| **clj-datachannel** | `main` | `cf590af55ceb` | `https://bitecho.org/git/clj-datachannel.git` |
 | **clj-web** | `master` | `verified` | `https://bitecho.org/git/clj-web.git` |
 
 ### Clojure CLI (`deps.edn`) Dependencies
@@ -25,9 +37,9 @@ Bitecho embraces a source-first distribution model inspired by Gentoo Linux:
 ;; In your deps.edn
 {:deps
  {alpeware/bitecho {:git/url "https://bitecho.org/git/bitecho.git"
-                   :git/sha "ecdd4056569ab2f1761db9061e6ea4880cc3d6a3"}
+                   :git/sha "f4fe2141eca3954825811b8210213643cf1cde1c"}
   alpeware/clj-datachannel {:git/url "https://bitecho.org/git/clj-datachannel.git"
-                           :git/sha "8854481ded15015966dd9f31308fb5ae918b18bb"}
+                           :git/sha "cf590af55cebb7e387a567bba7f301695d7cc384"}
   alpeware/clj-web {:git/url "https://bitecho.org/git/clj-web.git"
                    :git/tag "verified"}}}
 ```
@@ -72,6 +84,10 @@ Bitecho runs across 3 geographically distributed GCP `e2-micro` nodes (`ns1` in 
 
 ## Quick Links
 
+- [Light Node Onboarding Guide](/ONBOARDING.md)
+- [Light Node Skill & Protocol Reference](/skill/SKILL.md)
+- [Live Devnet Bootstrap Descriptor](/devnet/bootstrap.txt)
+- [Human Anchor Web Dashboard](/app/)
 - [Canonical Git Repositories](/git/)
 - [Release Signing Key](/keys.txt)
 - [LLM / Agent Overview](/llms.txt)

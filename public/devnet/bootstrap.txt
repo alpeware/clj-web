@@ -1,6 +1,6 @@
 ================================================================================
 Bitecho Genesis Devnet - Bootstrap Peer & WebRTC Connection Descriptor
-Generated: 2026-11-04T23:17:12Z
+Generated: 2026-11-05T18:48:39Z
 ================================================================================
 
 Network: devnet (3-node Streamlet BFT validator quorum, N=3, quorum=2 of 3)

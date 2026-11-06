@@ -268,6 +268,11 @@
           <option value="webcrypto-non-extractable">Non-Extractable WebCrypto (P-256)</option>
         </select>
       </div>
+      <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px;">
+        <button class="btn" id="registerYubiKeyCardBtn" style="flex: 1; font-size: 0.78rem; padding: 7px 10px;">🔑 Register Hardware YubiKey</button>
+        <button class="btn btn-success" id="recoverYubiKeyCardBtn" style="flex: 1; font-size: 0.78rem; padding: 7px 10px;">🔓 Recover from YubiKey</button>
+        <button class="btn btn-outline" id="saveStateIdbBtn" style="font-size: 0.78rem; padding: 7px 10px;" title="Save public identity &amp; address to IndexedDB for refresh continuity">💾 Save Identity</button>
+      </div>
       <div class="fido-box">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
           <span style="font-weight: 600; font-size: 0.85rem;" id="fidoName">YubiKey 5 Series</span>
@@ -364,7 +369,7 @@
     <pre id="outputLog">Loading BitechoBrowser bundle...</pre>
   </div>
 
-  <script src="/app/bitecho-browser.js" integrity="sha384-9RpQiNdxp1C63qajEcmgxrPZBU6mHFpqL8t3z430/X1mjCNTweLwrI81HHtTAMMX" crossorigin="anonymous"></script>
+  <script src="/app/bitecho-browser.js" integrity="sha384-Aw8q10AqGFykLVXjDGK0U9pzCGxE6siiNt1v2i9d/ZFsy0GA3NgV4mymsg7KRX9f" crossorigin="anonymous"></script>
   <script>
     (function () {
       const log = document.getElementById("outputLog");
@@ -506,9 +511,16 @@
           offersTbody.querySelectorAll("button[data-approve]").forEach(function (btn) {
             btn.onclick = function () {
               const id = btn.getAttribute("data-approve");
-              writeLog("Human Anchor approved offer: " + id);
+              writeLog("Human Anchor approving offer: " + id);
               const res = globalThis.BitechoBrowser.approveOffer(id);
+              if (!res || res.ok === false) {
+                writeLog("Approve offer failed: " + ((res && res.error) || "error"), res);
+                return;
+              }
+              selectedSessionId = id;
+              writeLog("Human Anchor approved offer: " + id);
               updateUI(res.dashboard);
+              renderChatAndSessions(globalThis.BitechoBrowser.getStatus());
             };
           });
 
@@ -518,6 +530,7 @@
               writeLog("Human Anchor denied offer: " + id);
               const res = globalThis.BitechoBrowser.denyOffer(id, "rejected-by-human");
               updateUI(res.dashboard);
+              renderChatAndSessions(globalThis.BitechoBrowser.getStatus());
             };
           });
         }
@@ -562,6 +575,27 @@
         }
       }
 
+      let selectedSessionId = null;
+      const knownOpenSessionIds = new Set();
+      let lastRenderedChatJson = null;
+
+      function syncPeerControlsForSelection(rawSessions, pubkeyToPetname) {
+        if (!selectedSessionId || !rawSessions || !rawSessions[selectedSessionId]) return;
+        const s = rawSessions[selectedSessionId];
+        const peerHex = s.peer || s.peerId || "peer";
+        const peerLabel = s.peer_petname || s["peer-petname"] || pubkeyToPetname[peerHex] || (peerHex.slice(0, 14) + "...");
+        const peerHandle = pubkeyToPetname[peerHex] || peerHex;
+        if (targetPeerInput && document.activeElement !== targetPeerInput) {
+          targetPeerInput.value = peerHandle;
+        }
+        if (activePeerLabel) {
+          activePeerLabel.textContent = "Peer: " + peerLabel + " (" + selectedSessionId.slice(0, 8) + ")";
+        }
+        if (chatInput) {
+          chatInput.placeholder = "Type sealed message to " + peerLabel + "...";
+        }
+      }
+
       function renderChatAndSessions(status) {
         if (!status) return;
         const balanceEl = document.getElementById("balanceDisplay");
@@ -602,14 +636,41 @@
 
         // 2. Active Sealed Sessions
         const rawSessions = status.sessions || {};
+        const petnames = status.petnames || {};
+        const pubkeyToPetname = {};
+        Object.keys(petnames).forEach(function (k) {
+          pubkeyToPetname[petnames[k]] = k;
+        });
         const sessEntries = Array.isArray(rawSessions)
           ? rawSessions
           : Object.entries(rawSessions).map(function (entry) {
               return Object.assign({ sessionId: entry[0] }, entry[1]);
             });
 
+        // Auto-select any newly opened session, or fallback when current selection is absent
+        const openEntries = sessEntries.filter(function (s) {
+          return String(s.state || s.status || "open").toUpperCase() === "OPEN";
+        });
+        let newlyOpenedId = null;
+        openEntries.forEach(function (s) {
+          if (s.sessionId && !knownOpenSessionIds.has(s.sessionId)) {
+            knownOpenSessionIds.add(s.sessionId);
+            newlyOpenedId = s.sessionId;
+          }
+        });
+        if (newlyOpenedId) {
+          selectedSessionId = newlyOpenedId;
+        }
+        if (selectedSessionId && !rawSessions[selectedSessionId]) {
+          selectedSessionId = null;
+        }
+        if (!selectedSessionId && openEntries.length > 0) {
+          selectedSessionId = openEntries[openEntries.length - 1].sessionId;
+        }
+        syncPeerControlsForSelection(rawSessions, pubkeyToPetname);
+
         if (sessionsCountBadge) {
-          sessionsCountBadge.textContent = sessEntries.length + " Active";
+          sessionsCountBadge.textContent = openEntries.length + " Open / " + sessEntries.length + " Total";
         }
 
         if (sessionsList && noSessionsMsg) {
@@ -624,15 +685,44 @@
             sessionsList.innerHTML = "";
             sessEntries.forEach(function (s) {
               const item = document.createElement("div");
-              item.style.cssText = "background: #16161c; padding: 6px 10px; border-radius: 4px; border: 1px solid #282834; display: flex; justify-content: space-between; align-items: center;";
-              const peerShort = (s.peer || s.peerId || "peer").slice(0, 16) + "...";
-              const st = (s.status || "open").toUpperCase();
+              const isSelected = s.sessionId && s.sessionId === selectedSessionId;
+              const st = String(s.state || s.status || "open").toUpperCase();
               const badgeClass = st === "OPEN" ? "badge-success" : "badge-warning";
+              const peerHex = s.peer || s.peerId || "peer";
+              const peerLabel = s.peer_petname || s["peer-petname"] || pubkeyToPetname[peerHex] || (peerHex.slice(0, 14) + "...");
+              item.style.cssText = (isSelected
+                ? "background: #1e1b4b; padding: 6px 10px; border-radius: 4px; border: 1px solid #6366f1; "
+                : "background: #16161c; padding: 6px 10px; border-radius: 4px; border: 1px solid #282834; ") +
+                "display: flex; justify-content: space-between; align-items: center; cursor: pointer;";
+              item.title = "Click to select session " + (s.sessionId || "") + " (" + st + ")";
               item.innerHTML = "<div>" +
-                "<strong style='color: #a5b4fc;'>" + (s.sessionId ? s.sessionId.slice(0, 12) + "..." : "session") + "</strong> " +
-                "<span style='color: var(--text-muted); font-size: 0.72rem;'>→ " + peerShort + "</span>" +
+                "<strong style='color: #a5b4fc;'>" + (s.sessionId ? s.sessionId.slice(0, 10) + "..." : "session") + "</strong> " +
+                "<span style='color: var(--text-muted); font-size: 0.72rem;'>→ " + peerLabel + "</span>" +
                 "</div>" +
-                "<span class='badge " + badgeClass + "' style='font-size: 0.65rem;'>" + st + "</span>";
+                "<div style='display: flex; gap: 6px; align-items: center;'>" +
+                "<span class='badge " + badgeClass + "' style='font-size: 0.65rem;'>" + st + "</span>" +
+                "<button class='btn btn-outline' data-close-session='" + (s.sessionId || "") + "' title='Remove session' style='padding: 1px 6px; font-size: 0.68rem; line-height: 1.2;'>×</button>" +
+                "</div>";
+              item.onclick = function (ev) {
+                if (ev.target && ev.target.getAttribute && ev.target.getAttribute("data-close-session")) {
+                  return;
+                }
+                selectedSessionId = s.sessionId;
+                syncPeerControlsForSelection(rawSessions, pubkeyToPetname);
+                renderChatAndSessions(globalThis.BitechoBrowser.getStatus());
+              };
+              const closeBtn = item.querySelector("button[data-close-session]");
+              if (closeBtn) {
+                closeBtn.onclick = function (ev) {
+                  ev.stopPropagation();
+                  const sid = closeBtn.getAttribute("data-close-session");
+                  if (sid && typeof globalThis.BitechoBrowser.closeSession === "function") {
+                    if (selectedSessionId === sid) selectedSessionId = null;
+                    globalThis.BitechoBrowser.closeSession(sid);
+                    writeLog("Removed session: " + sid.slice(0, 12) + "...");
+                  }
+                };
+              }
               sessionsList.appendChild(item);
             });
           }
@@ -641,35 +731,43 @@
         // 3. Chat History Thread
         if (chatMessages) {
           const history = status.chatHistory || [];
-          if (history.length === 0) {
-            chatMessages.innerHTML = "<div style='color: var(--text-muted); text-align: center; margin-top: 40px; font-style: italic;'>" +
-              (status.meshConnected ? "Channel ready. Send a sealed message to Axiom." : "Connect to devnet mesh and open a sealed channel to message Axiom.") +
-              "</div>";
-          } else {
-            chatMessages.innerHTML = "";
-            history.forEach(function (msg) {
-              const msgDiv = document.createElement("div");
-              const isOutgoing = msg.direction === "outgoing";
-              msgDiv.style.cssText = "display: flex; flex-direction: column; margin-bottom: 8px; align-items: " + (isOutgoing ? "flex-end" : "flex-start") + ";";
+          const chatJson = JSON.stringify({ h: history, c: Boolean(status.meshConnected) });
+          if (chatJson !== lastRenderedChatJson) {
+            lastRenderedChatJson = chatJson;
+            if (history.length === 0) {
+              chatMessages.innerHTML = "<div style='color: var(--text-muted); text-align: center; margin-top: 40px; font-style: italic;'>" +
+                (status.meshConnected ? "Channel ready. Send a sealed message to peer." : "Connect to devnet mesh and open a sealed channel to message peer.") +
+                "</div>";
+            } else {
+              chatMessages.innerHTML = "";
+              history.forEach(function (msg) {
+                const msgDiv = document.createElement("div");
+                const isOutgoing = msg.direction === "outgoing";
+                msgDiv.style.cssText = "display: flex; flex-direction: column; margin-bottom: 8px; align-items: " + (isOutgoing ? "flex-end" : "flex-start") + ";";
 
-              const bubble = document.createElement("div");
-              bubble.style.cssText = "max-width: 80%; padding: 8px 12px; border-radius: 6px; font-size: 0.8rem; word-break: break-word; " +
-                (isOutgoing ? "background: #312e81; color: #e0e7ff; border: 1px solid #4338ca;" : "background: #064e3b; color: #d1fae5; border: 1px solid #047857;");
+                const bubble = document.createElement("div");
+                bubble.style.cssText = "max-width: 80%; padding: 8px 12px; border-radius: 6px; font-size: 0.8rem; word-break: break-word; " +
+                  (isOutgoing ? "background: #312e81; color: #e0e7ff; border: 1px solid #4338ca;" : "background: #064e3b; color: #d1fae5; border: 1px solid #047857;");
 
-              const header = document.createElement("div");
-              header.style.cssText = "font-size: 0.68rem; opacity: 0.75; margin-bottom: 2px; display: flex; justify-content: space-between; gap: 8px;";
-              const timeStr = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString() : "";
-              header.innerHTML = "<span>" + (isOutgoing ? "You" : (msg.peer || "Peer")) + "</span><span>" + timeStr + "</span>";
+                const header = document.createElement("div");
+                header.style.cssText = "font-size: 0.68rem; opacity: 0.75; margin-bottom: 2px; display: flex; justify-content: space-between; gap: 8px;";
+                const timeStr = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString() : "";
+                const sidTag = msg.sessionId ? " (" + String(msg.sessionId).slice(0, 6) + ")" : "";
+                const senderLabel = isOutgoing
+                  ? ("You → " + (msg.peer || "Peer") + sidTag)
+                  : ((msg.peer || "Peer") + sidTag);
+                header.innerHTML = "<span>" + senderLabel + "</span><span>" + timeStr + "</span>";
 
-              const body = document.createElement("div");
-              body.textContent = msg.text || "";
+                const body = document.createElement("div");
+                body.textContent = msg.text || "";
 
-              bubble.appendChild(header);
-              bubble.appendChild(body);
-              msgDiv.appendChild(bubble);
-              chatMessages.appendChild(msgDiv);
-            });
-            chatMessages.scrollTop = chatMessages.scrollHeight;
+                bubble.appendChild(header);
+                bubble.appendChild(body);
+                msgDiv.appendChild(bubble);
+                chatMessages.appendChild(msgDiv);
+              });
+              chatMessages.scrollTop = chatMessages.scrollHeight;
+            }
           }
         }
       }
@@ -688,6 +786,7 @@
 
       if (targetPeerInput) {
         targetPeerInput.oninput = function () {
+          selectedSessionId = null;
           const val = targetPeerInput.value.trim() || "axiom";
           if (activePeerLabel) activePeerLabel.textContent = "Peer: " + val;
         };
@@ -711,9 +810,9 @@
         const text = chatInput.value.trim();
         if (!text) return;
         const target = (targetPeerInput && targetPeerInput.value.trim()) || "axiom";
-        writeLog("Sending sealed message to " + target + ": " + text);
+        writeLog("Sending sealed message to " + target + (selectedSessionId ? " (session " + selectedSessionId.slice(0, 8) + "...)" : "") + ": " + text);
         try {
-          const res = globalThis.BitechoBrowser.sendMessage(target, text);
+          const res = globalThis.BitechoBrowser.sendMessage(target, text, selectedSessionId);
           if (!res || res.ok === false) {
             writeLog("Send message failed: " + ((res && res.error) || "no-open-session-for-peer"), res);
             return;
@@ -798,7 +897,7 @@
         writeLog("Simulated incoming offer queued on anchor.");
       };
 
-      document.getElementById("registerYubiKeyBtn").onclick = async function () {
+      async function handleRegisterYubiKey() {
         writeLog("Prompting hardware authenticator (WebAuthn create)...");
         try {
           const cred = await globalThis.BitechoBrowser.createDiscoverableCredential();
@@ -818,9 +917,9 @@
         } catch (err) {
           writeLog("YubiKey registration error: " + (err.message || err));
         }
-      };
+      }
 
-      document.getElementById("recoverYubiKeyBtn").onclick = async function () {
+      async function handleRecoverYubiKey() {
         writeLog("Prompting hardware authenticator (WebAuthn get)...");
         try {
           const cred = await globalThis.BitechoBrowser.getDiscoverableCredential();
@@ -840,7 +939,29 @@
         } catch (err) {
           writeLog("YubiKey recovery error: " + (err.message || err));
         }
-      };
+      }
+
+      document.getElementById("registerYubiKeyBtn").onclick = handleRegisterYubiKey;
+      document.getElementById("recoverYubiKeyBtn").onclick = handleRecoverYubiKey;
+      const regCardBtn = document.getElementById("registerYubiKeyCardBtn");
+      if (regCardBtn) regCardBtn.onclick = handleRegisterYubiKey;
+      const recCardBtn = document.getElementById("recoverYubiKeyCardBtn");
+      if (recCardBtn) recCardBtn.onclick = handleRecoverYubiKey;
+      const saveIdbBtn = document.getElementById("saveStateIdbBtn");
+      if (saveIdbBtn) {
+        saveIdbBtn.onclick = function () {
+          Promise.resolve(globalThis.BitechoBrowser.saveStateToIndexedDB()).then(function (res) {
+            const st = globalThis.BitechoBrowser.getStatus();
+            writeLog("Saved public identity & address to IndexedDB:", {
+              address: st && st.address,
+              pubkey: st && st.pubkey,
+              result: res
+            });
+          }).catch(function (err) {
+            writeLog("Failed to save identity to IndexedDB: " + (err.message || err));
+          });
+        };
+      }
 
       document.getElementById("spawnAgentBtn").onclick = function () {
         const aid = "agent-" + Math.floor(Math.random() * 900 + 100);

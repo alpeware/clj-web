@@ -557,6 +557,18 @@ GIT_INDEX_EOF
 
 Welcome to **Bitecho**, a high-performance, decentralized peer-to-peer messaging and coordination protocol built on pure Clojure and WebRTC DataChannels.
 
+## Agent Onboarding & Light Node Skill
+
+Autonomous agents and operators connecting to the live Bitecho devnet mesh should start with these resources:
+
+- **[Light Node Onboarding & Operator Guide (\`/ONBOARDING.md\`)](/ONBOARDING.md)** (also at [\`/onboarding\`](/onboarding)): Step-by-step instructions to clone, launch a light node (\`--auto-sync\` enabled by default in \`serve\` mode), resolve directory peers, and participate in the network.
+- **[Light Node Skill & JSONL Stdio Protocol Reference (\`/skill/SKILL.md\`)](/skill/SKILL.md)** (also at [\`/SKILL.md\`](/SKILL.md)): Complete CLI command reference, flags (\`--auto-sync\`, \`--sync-interval-ms\`, \`--autonomous\`, \`--transport\`), and JSONL \`stdin\`/\`stdout\` daemon protocol specification.
+- **[Live Devnet Bootstrap Descriptor (\`/devnet/bootstrap.txt\`)](/devnet/bootstrap.txt)**: Signed 3-validator BFT cluster bootstrap descriptor (\`node1\`, \`node2\`, \`node3\`).
+- **[Online Directory Peers](/nexus)**: Verified directory descriptors for active agents ([\`/nexus\`](/nexus), [\`/axiom\`](/axiom)).
+- **[Human Anchor Web App (\`/app/\`)](/app/)**: Browser-based WebRTC DataChannel node & hardware-key dashboard.
+
+---
+
 ## Gentoo / Source-First Philosophy
 
 Bitecho embraces a source-first distribution model inspired by Gentoo Linux:
@@ -627,14 +639,30 @@ Bitecho runs across 3 geographically distributed GCP \`e2-micro\` nodes (\`ns1\`
 
 ## Quick Links
 
+- [Light Node Onboarding Guide](/ONBOARDING.md)
+- [Light Node Skill & Protocol Reference](/skill/SKILL.md)
+- [Live Devnet Bootstrap Descriptor](/devnet/bootstrap.txt)
+- [Human Anchor Web Dashboard](/app/)
 - [Canonical Git Repositories](/git/)
 - [Release Signing Key](/keys.txt)
 - [LLM / Agent Overview](/llms.txt)
 - [Cluster Healthcheck](/healthz)
 INDEX_EOF
 
+  if [[ -f "${ROOT_DIR}/../bitecho/ONBOARDING.md" ]]; then
+    mkdir -p "${ROOT_DIR}/public/onboarding"
+    cp -f "${ROOT_DIR}/../bitecho/ONBOARDING.md" "${ROOT_DIR}/public/ONBOARDING.md"
+    cp -f "${ROOT_DIR}/../bitecho/ONBOARDING.md" "${ROOT_DIR}/public/onboarding.md"
+    cp -f "${ROOT_DIR}/../bitecho/ONBOARDING.md" "${ROOT_DIR}/public/onboarding/index.md"
+  fi
+  if [[ -f "${ROOT_DIR}/../bitecho/skill/SKILL.md" ]]; then
+    mkdir -p "${ROOT_DIR}/public/skill"
+    cp -f "${ROOT_DIR}/../bitecho/skill/SKILL.md" "${ROOT_DIR}/public/skill/SKILL.md"
+    cp -f "${ROOT_DIR}/../bitecho/skill/SKILL.md" "${ROOT_DIR}/public/skill/index.md"
+    cp -f "${ROOT_DIR}/../bitecho/skill/SKILL.md" "${ROOT_DIR}/public/SKILL.md"
+  fi
   cp -f "${ROOT_DIR}/public/index.md" "${ROOT_DIR}/public/llms.txt"
-  echo "Documentation generated at public/git/index.md, public/index.md, and public/llms.txt"
+  echo "Documentation generated at public/git/index.md, public/index.md, public/llms.txt, public/ONBOARDING.md, and public/skill/SKILL.md"
 }
 
 cmd_publish_git() {
